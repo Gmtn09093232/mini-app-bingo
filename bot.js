@@ -15,7 +15,17 @@ bot.start((ctx) => {
             ]
         }
     });
+    bot.start((ctx) => {
+    ctx.reply('Play now', {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "Open Game", url: FRONTEND_URL }]
+            ]
+        }
+    });
 });
+});
+
 
 bot.launch();
 console.log('Bot is running...');
