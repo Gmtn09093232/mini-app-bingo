@@ -1,7 +1,7 @@
 const { Telegraf } = require('telegraf');
 const BOT_TOKEN = '8650975160:AAHcBuG5UqhYpv7Iat1SufhERrBayussbZk'; // Your token
 const APP_URL = 'https://mini-app-bingo.onrender.com';
-const FRONTEND_URL = `${APP_URL}/frontend`; // URL of your frontend app
+const FRONTEND_URL = 'https://bingomini.netlify.app/'; // URL of your frontend app
 const bot = new Telegraf(BOT_TOKEN);
 
 bot.start((ctx) => {
