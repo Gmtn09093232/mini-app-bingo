@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BINGO · Telegram Mini App</title>
     <style>
-        * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+        * { box-sizing: border-box; user-select: none; }
         body {
             font-family: 'Segoe UI', system-ui;
             background: linear-gradient(145deg, #0a0f1e 0%, #0d1b2a 100%);
@@ -15,9 +15,8 @@
             min-height: 100vh;
         }
         .container { max-width: 1300px; margin: 0 auto; }
-        .game-panel {
+        .auth-panel, .game-panel {
             background: #11212ecc;
-            -webkit-backdrop-filter: blur(8px);
             backdrop-filter: blur(8px);
             border-radius: 48px;
             padding: 25px;
@@ -43,7 +42,7 @@
         }
         button.primary { background: #e67e22; }
         button.danger { background: #7f2a2a; }
-        input {
+        input, .name-input {
             background: #1f2e3b;
             border: none;
             padding: 10px 20px;
@@ -105,22 +104,23 @@
             border-radius: 60px;
             padding: 6px 16px;
             font-weight: bold;
-            display: inline-block;
-            margin-top: 10px;
-        }
-        .loading {
-            text-align: center;
-            padding: 50px;
-            font-size: 1.5rem;
         }
     </style>
 </head>
 <body>
 <div class="container">
-    <div id="loadingMessage" class="loading">🔄 Loading Telegram...</div>
+    <!-- AUTH PANEL -->
+    <div id="authPanel" class="auth-panel">
+        <h2>🎲 BINGO · Login / Register</h2>
+        <input type="text" id="loginUsername" placeholder="Username">
+        <input type="password" id="loginPassword" placeholder="Password">
+        <button id="loginBtn" class="primary">Login</button>
+        <button id="registerBtn">Register</button>
+        <div id="authError" class="auth-error" style="color:#ff9999; margin-top:10px;"></div>
+    </div>
 
-    <!-- GAME PANEL (initially hidden) -->
-    <div id="gamePanel" class="game-panel hidden">
+    <!-- GAME PANEL (after login) -->
+    <div id="gamePanel" class="hidden">
         <div class="balance-bar">
             <span>💰 Balance: <strong id="balanceAmount">0</strong> credits</span>
             <div>
@@ -187,7 +187,7 @@
     let isLobbyOpen = true;
 
     // DOM elements
-    const loadingMsg = document.getElementById('loadingMessage');
+    const authPanel = document.getElementById('authPanel');
     const gamePanel = document.getElementById('gamePanel');
     const balanceSpan = document.getElementById('balanceAmount');
     const cardsGrid = document.getElementById('cardsGrid');
@@ -200,12 +200,8 @@
     const winnerMsgDiv = document.getElementById('winnerMessage');
     const myCardDiv = document.getElementById('myCard');
     const masterBoardDiv = document.getElementById('masterBoard');
+    const authError = document.getElementById('authError');
     const prizeBox = document.getElementById('prizeBox');
-
-    // Telegram WebApp init
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    tg.enableClosingConfirmation();
 
     async function apiCall(endpoint, method, body) {
         const res = await fetch(endpoint, {
@@ -216,35 +212,38 @@
         return res.json();
     }
 
-    // Auto‑authenticate with Telegram data
-    async function authenticateWithTelegram() {
-        let userData = tg.initDataUnsafe?.user;
-        if (!userData) {
-            // Fallback for local testing (no Telegram context)
-            userData = { id: 123456, first_name: 'Guest', username: 'guest' };
-        }
-        const payload = {
-            id: userData.id,
-            username: userData.username || userData.first_name,
-            firstName: userData.first_name,
-            lastName: userData.last_name
-        };
-        const data = await apiCall('/api/telegram-auth', 'POST', payload);
-        if (data.error) {
-            alert('Auth failed: ' + data.error);
-            return null;
-        }
+    // Login / Register
+    document.getElementById('loginBtn').onclick = async () => {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        if (!username || !password) { authError.innerText = 'Fill all fields'; return; }
+        const data = await apiCall('/api/login', 'POST', { username, password });
+        if (data.error) { authError.innerText = data.error; return; }
         currentUser = { username: data.username };
         balanceSpan.innerText = data.balance;
-        return data;
-    }
-
-    // Logout
+        initSocket(data.username);
+        showGamePanel();
+    };
+    document.getElementById('registerBtn').onclick = async () => {
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        if (!username || !password) { authError.innerText = 'Fill all fields'; return; }
+        const data = await apiCall('/api/register', 'POST', { username, password });
+        if (data.error) { authError.innerText = data.error; return; }
+        currentUser = { username: data.username };
+        balanceSpan.innerText = data.balance;
+        initSocket(data.username);
+        showGamePanel();
+    };
     document.getElementById('logoutBtn').onclick = async () => {
         await apiCall('/api/logout', 'POST', {});
         if (socket) socket.disconnect();
-        tg.close(); // Close the Mini App
+        showAuthPanel();
+        currentUser = null;
     };
+
+    function showGamePanel() { gamePanel.classList.remove('hidden'); authPanel.classList.add('hidden'); }
+    function showAuthPanel() { gamePanel.classList.add('hidden'); authPanel.classList.remove('hidden'); }
 
     // Deposit / Withdraw modal
     const modal = document.getElementById('transactionModal');
@@ -267,7 +266,7 @@
     };
     document.getElementById('txnCancelBtn').onclick = () => { modal.style.display = 'none'; txnAmount.value = ''; };
 
-    // Socket.IO initialization
+    // Socket.IO
     function initSocket(username) {
         if (socket) socket.disconnect();
         socket = io();
@@ -426,18 +425,7 @@
 
     function escapeHtml(str) { return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
 
-    // Start the app
-    (async () => {
-        const auth = await authenticateWithTelegram();
-        if (auth) {
-            loadingMsg.classList.add('hidden');
-            gamePanel.classList.remove('hidden');
-            initSocket(currentUser.username);
-            buildMasterBoard();
-        } else {
-            loadingMsg.innerText = 'Failed to authenticate. Please restart.';
-        }
-    })();
+    buildMasterBoard(); // initial empty board
 </script>
 </body>
 </html>
