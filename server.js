@@ -3,6 +3,7 @@ const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
 const session = require('express-session');
+const bcrypt = require('bcrypt');
 const fs = require('fs-extra');
 const { v4: uuidv4 } = require('uuid');
 
@@ -10,10 +11,11 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-    secret: 'bingo_telegram_secret',
+    secret: 'bingo_super_secret_key_change_me',
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false, maxAge: 1000 * 60 * 60 * 24 }
@@ -36,41 +38,46 @@ function saveUsers() {
     fs.writeJsonSync(USERS_FILE, users, { spaces: 2 });
 }
 
-// Get logged in user from session
 function getLoggedInUser(req) {
     if (!req.session.userId) return null;
     return Object.values(users).find(u => u.userId === req.session.userId);
 }
 
-// ---------- Telegram Auto‑Auth ----------
-// Expects { id, username, firstName, lastName } from frontend
-app.post('/api/telegram-auth', (req, res) => {
-    const { id, username, firstName, lastName } = req.body;
-    if (!id) return res.status(400).json({ error: 'No Telegram user ID' });
-
-    const displayName = username || firstName || `User_${id}`;
-    let user = Object.values(users).find(u => u.telegramId === id);
-    if (!user) {
-        // Create new user
-        const userId = uuidv4();
-        user = {
-            userId,
-            telegramId: id,
-            username: displayName,
-            balance: 10,      // free starting credits
-            createdAt: new Date().toISOString()
-        };
-        users[displayName] = user; // key by name (or we could key by telegramId)
-        // Also store by telegramId for faster lookup
-        users[`telegram_${id}`] = user;
-        saveUsers();
-    }
-    req.session.userId = user.userId;
-    req.session.username = user.username;
-    res.json({ success: true, username: user.username, balance: user.balance });
+// ---------- Auth endpoints ----------
+app.post('/api/register', async (req, res) => {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Missing fields' });
+    if (users[username]) return res.status(400).json({ error: 'Username exists' });
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const userId = uuidv4();
+    users[username] = {
+        userId, username,
+        password: hashedPassword,
+        balance: 100,
+        createdAt: new Date().toISOString()
+    };
+    saveUsers();
+    req.session.userId = userId;
+    req.session.username = username;
+    res.json({ success: true, username, balance: users[username].balance });
 });
 
-// ---------- Balance endpoints (same as before) ----------
+app.post('/api/login', async (req, res) => {
+    const { username, password } = req.body;
+    const user = users[username];
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+    req.session.userId = user.userId;
+    req.session.username = username;
+    res.json({ success: true, username, balance: user.balance });
+});
+
+app.post('/api/logout', (req, res) => {
+    req.session.destroy();
+    res.json({ success: true });
+});
+
 app.post('/api/deposit', async (req, res) => {
     const user = getLoggedInUser(req);
     if (!user) return res.status(401).json({ error: 'Not logged in' });
@@ -94,13 +101,8 @@ app.post('/api/withdraw', async (req, res) => {
     res.json({ success: true, newBalance: user.balance });
 });
 
-app.post('/api/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ success: true });
-});
-
-// ---------- Game state (unchanged from your working version) ----------
-let players = {};
+// ---------- Game state ----------
+let players = {};           // socketId -> player
 let takenCards = new Set();
 let gameActive = false;
 let calledNumbers = [];
@@ -109,13 +111,14 @@ let countdownTimeout = null;
 let countdownSeconds = 30;
 let isLobbyOpen = true;
 const GAME_COST = 10;
-const HOUSE_PERCENT = 0.2;
+const HOUSE_PERCENT = 0.2;  // 20% house fee
 
 function calculatePrize() {
     const playerCount = Object.keys(players).length;
     return GAME_COST * playerCount * (1 - HOUSE_PERCENT);
 }
 
+// Deterministic card generator (same as yours)
 function generateCardFromNumber(cardNum) {
     function seededRandom(seed) {
         let x = Math.sin(seed) * 10000;
@@ -183,10 +186,11 @@ function startCountdown() {
 
 function startGame() {
     if (gameActive) return;
+    // Deduct cost from players
     const playersToRemove = [];
     for (let id in players) {
         const p = players[id];
-        const user = Object.values(users).find(u => u.username === p.username);
+        const user = users[p.username];
         if (!user || user.balance < GAME_COST) {
             playersToRemove.push(id);
             io.to(id).emit('error', `Insufficient balance (need ${GAME_COST} credits).`);
@@ -218,7 +222,7 @@ function startGame() {
     for (let id in players) {
         const p = players[id];
         p.marked = new Array(25).fill(false);
-        p.marked[12] = true;
+        p.marked[12] = true; // FREE space
         io.to(id).emit('cardAssigned', {
             playerId: id,
             card: p.card,
@@ -242,22 +246,26 @@ function startGame() {
 }
 
 function checkWin(marked) {
+    // rows
     for (let r = 0; r < 5; r++) {
         let win = true;
         for (let c = 0; c < 5; c++) if (!marked[r * 5 + c]) { win = false; break; }
         if (win) return true;
     }
+    // columns
     for (let c = 0; c < 5; c++) {
         let win = true;
         for (let r = 0; r < 5; r++) if (!marked[r * 5 + c]) { win = false; break; }
         if (win) return true;
     }
+    // diagonals
     let diag1 = true, diag2 = true;
     for (let i = 0; i < 5; i++) {
         if (!marked[i * 5 + i]) diag1 = false;
         if (!marked[i * 5 + (4 - i)]) diag2 = false;
     }
     if (diag1 || diag2) return true;
+    // four corners
     const corners = [0, 4, 20, 24];
     return corners.every(idx => marked[idx]);
 }
@@ -275,7 +283,7 @@ function handleMark(socketId, cellIndex, numberValue) {
         if (autoInterval) clearInterval(autoInterval);
         autoInterval = null;
         const prize = calculatePrize();
-        const winnerUser = Object.values(users).find(u => u.username === player.username);
+        const winnerUser = users[player.username];
         if (winnerUser) {
             winnerUser.balance += prize;
             saveUsers();
@@ -308,7 +316,7 @@ io.on('connection', (socket) => {
         for (let i = 1; i <= 100; i++) if (!takenCards.has(i)) available.push(i);
         socket.emit('availableCards', available);
         socket.emit('lobbyState', { isLobbyOpen, countdown: countdownSeconds, gameActive });
-        const user = Object.values(users).find(u => u.username === username);
+        const user = users[username];
         if (user) socket.emit('balanceUpdate', user.balance);
     });
 
