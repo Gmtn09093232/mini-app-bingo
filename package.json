@@ -17,6 +17,7 @@
     "express-session": "^1.19.0",
     "fs-extra": "^11.3.4",
     "socket.io": "^4.8.3",
+    "telegraf": "^4.16.3",
     "uuid": "^13.0.0"
   }
 }
