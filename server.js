@@ -53,7 +53,7 @@ app.post('/api/register', async (req, res) => {
     users[username] = {
         userId, username,
         password: hashedPassword,
-        balance: 100,
+        balance: 10,
         createdAt: new Date().toISOString()
     };
     saveUsers();
@@ -78,31 +78,74 @@ app.post('/api/logout', (req, res) => {
     res.json({ success: true });
 });
 
-app.post('/api/deposit', async (req, res) => {
+// ---------- Request storage ----------
+const REQUESTS_FILE = './requests.json';
+fs.ensureFileSync(REQUESTS_FILE);
+let pendingRequests = [];
+try {
+    pendingRequests = fs.readJsonSync(REQUESTS_FILE);
+} catch (e) { pendingRequests = []; }
+
+function saveRequests() {
+    fs.writeJsonSync(REQUESTS_FILE, pendingRequests, { spaces: 2 });
+}
+
+// ---------- Deposit/Withdraw request endpoints (admin approval) ----------
+app.post('/api/request-deposit', async (req, res) => {
     const user = getLoggedInUser(req);
     if (!user) return res.status(401).json({ error: 'Not logged in' });
     const { amount } = req.body;
     const num = parseFloat(amount);
     if (isNaN(num) || num <= 0) return res.status(400).json({ error: 'Invalid amount' });
-    user.balance += num;
-    saveUsers();
-    res.json({ success: true, newBalance: user.balance });
+
+    const requestId = uuidv4();
+    const newRequest = {
+        id: requestId,
+        userId: user.userId,
+        username: user.username,
+        type: 'deposit',
+        amount: num,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+    };
+    pendingRequests.push(newRequest);
+    saveRequests();
+    res.json({ success: true, message: 'Deposit request submitted. Awaiting admin approval.' });
 });
 
-app.post('/api/withdraw', async (req, res) => {
+app.post('/api/request-withdraw', async (req, res) => {
     const user = getLoggedInUser(req);
     if (!user) return res.status(401).json({ error: 'Not logged in' });
     const { amount } = req.body;
     const num = parseFloat(amount);
     if (isNaN(num) || num <= 0) return res.status(400).json({ error: 'Invalid amount' });
     if (user.balance < num) return res.status(400).json({ error: 'Insufficient balance' });
-    user.balance -= num;
-    saveUsers();
-    res.json({ success: true, newBalance: user.balance });
+
+    const requestId = uuidv4();
+    const newRequest = {
+        id: requestId,
+        userId: user.userId,
+        username: user.username,
+        type: 'withdraw',
+        amount: num,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+    };
+    pendingRequests.push(newRequest);
+    saveRequests();
+    res.json({ success: true, message: 'Withdraw request submitted. Awaiting admin approval.' });
 });
 
-// ---------- Game state ----------
-let players = {};           // socketId -> player
+// (Optional) Admin endpoints to get pending requests via API – not required for bot, but can be used.
+app.get('/api/admin/pending-requests', (req, res) => {
+    const adminKey = req.headers['admin-key'];
+    if (adminKey !== 'secret123') return res.status(403).json({ error: 'Forbidden' });
+    const pending = pendingRequests.filter(r => r.status === 'pending');
+    res.json(pending);
+});
+
+// ---------- Game state (unchanged) ----------
+let players = {};
 let takenCards = new Set();
 let gameActive = false;
 let calledNumbers = [];
@@ -111,14 +154,13 @@ let countdownTimeout = null;
 let countdownSeconds = 30;
 let isLobbyOpen = true;
 const GAME_COST = 10;
-const HOUSE_PERCENT = 0.2;  // 20% house fee
+const HOUSE_PERCENT = 0.2;
 
 function calculatePrize() {
     const playerCount = Object.keys(players).length;
     return GAME_COST * playerCount * (1 - HOUSE_PERCENT);
 }
 
-// Deterministic card generator (same as yours)
 function generateCardFromNumber(cardNum) {
     function seededRandom(seed) {
         let x = Math.sin(seed) * 10000;
@@ -186,7 +228,6 @@ function startCountdown() {
 
 function startGame() {
     if (gameActive) return;
-    // Deduct cost from players
     const playersToRemove = [];
     for (let id in players) {
         const p = players[id];
@@ -222,7 +263,7 @@ function startGame() {
     for (let id in players) {
         const p = players[id];
         p.marked = new Array(25).fill(false);
-        p.marked[12] = true; // FREE space
+        p.marked[12] = true;
         io.to(id).emit('cardAssigned', {
             playerId: id,
             card: p.card,
@@ -246,26 +287,22 @@ function startGame() {
 }
 
 function checkWin(marked) {
-    // rows
     for (let r = 0; r < 5; r++) {
         let win = true;
         for (let c = 0; c < 5; c++) if (!marked[r * 5 + c]) { win = false; break; }
         if (win) return true;
     }
-    // columns
     for (let c = 0; c < 5; c++) {
         let win = true;
         for (let r = 0; r < 5; r++) if (!marked[r * 5 + c]) { win = false; break; }
         if (win) return true;
     }
-    // diagonals
     let diag1 = true, diag2 = true;
     for (let i = 0; i < 5; i++) {
         if (!marked[i * 5 + i]) diag1 = false;
         if (!marked[i * 5 + (4 - i)]) diag2 = false;
     }
     if (diag1 || diag2) return true;
-    // four corners
     const corners = [0, 4, 20, 24];
     return corners.every(idx => marked[idx]);
 }

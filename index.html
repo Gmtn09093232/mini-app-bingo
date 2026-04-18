@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BINGO · Telegram Mini App</title>
     <style>
-        * { box-sizing: border-box; user-select: none; }
+        * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
         body {
             font-family: 'Segoe UI', system-ui;
             background: linear-gradient(145deg, #0a0f1e 0%, #0d1b2a 100%);
@@ -17,6 +17,7 @@
         .container { max-width: 1300px; margin: 0 auto; }
         .auth-panel, .game-panel {
             background: #11212ecc;
+            -webkit-backdrop-filter: blur(8px);
             backdrop-filter: blur(8px);
             border-radius: 48px;
             padding: 25px;
