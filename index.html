@@ -423,7 +423,18 @@
             if (cell) cell.classList.remove("called");
         }
     }
+function logout() {
+  fetch("/logout", { method: "POST" })
+    .then(res => res.json())
+    .then(() => {
+      socket.emit("logout");
+    });
+}
 
+socket.on("loggedOut", () => {
+  socket.disconnect();
+  window.location.href = "/login";
+});
     function escapeHtml(str) { return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
 
     buildMasterBoard(); // initial empty board

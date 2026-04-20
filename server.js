@@ -394,7 +394,18 @@ io.on('connection', (socket) => {
     socket.on('markNumber', ({ cellIndex, number }) => {
         handleMark(socket.id, cellIndex, number);
     });
+app.post("/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({ success: true });
+  });
+});
 
+io.on("connection", (socket) => {
+  socket.on("logout", () => {
+    socket.emit("loggedOut");
+    socket.disconnect(true);
+  });
+});
     socket.on('disconnect', () => {
         if (players[socket.id]) {
             const cardNum = players[socket.id].cardNumber;
