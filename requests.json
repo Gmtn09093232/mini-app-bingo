@@ -22,5 +22,21 @@
     "type": "deposit",
     "amount": 200,
     "status": "approved"
+  },
+  {
+    "id": 1777107027849,
+    "userId": 5423314276,
+    "username": "giziemelkamu129",
+    "type": "withdraw",
+    "amount": 300,
+    "status": "approved"
+  },
+  {
+    "id": 1777107062158,
+    "userId": 5423314276,
+    "username": "giziemelkamu129",
+    "type": "deposit",
+    "amount": 2000,
+    "status": "approved"
   }
 ]
