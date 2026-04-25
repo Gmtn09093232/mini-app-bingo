@@ -2,9 +2,8 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
-const session = require('express-session');
-const bcrypt = require('bcrypt');
 const fs = require('fs-extra');
+const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
 
 const app = express();
@@ -19,13 +18,6 @@ require('dotenv').config();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(session({
-    secret: 'bingo_super_secret_key_change_me',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { secure: false, maxAge: 1000 * 60 * 60 * 24 }
-}));
-
 /* =======================
    FRONTEND
 ======================= */
@@ -34,7 +26,8 @@ app.get('/', (req, res) => {
 });
 
 /* =======================
-   USERS (JSON DB)
+   USERS DB (JSON)
+   KEY = Telegram ID
 ======================= */
 const USERS_FILE = './users.json';
 fs.ensureFileSync(USERS_FILE);
@@ -47,20 +40,7 @@ function saveUsers() {
 }
 
 /* =======================
-   REQUESTS
-======================= */
-const REQUESTS_FILE = './requests.json';
-fs.ensureFileSync(REQUESTS_FILE);
-
-let pendingRequests = [];
-try { pendingRequests = fs.readJsonSync(REQUESTS_FILE); } catch { pendingRequests = []; }
-
-function saveRequests() {
-    fs.writeJsonSync(REQUESTS_FILE, pendingRequests, { spaces: 2 });
-}
-
-/* =======================
-   SOCKET USERS MAP
+   SOCKET USER AUTH MAP
 ======================= */
 const socketUsers = new Map();
 
@@ -71,32 +51,7 @@ let players = {};
 let takenCards = new Set();
 let gameActive = false;
 let calledNumbers = [];
-let autoInterval = null;
-let countdownTimeout = null;
-let countdownSeconds = 30;
 let isLobbyOpen = true;
-
-const GAME_COST = 10;
-const HOUSE_PERCENT = 0.2;
-
-/* =======================
-   HELPERS
-======================= */
-function getUserById(userId) {
-    return users[userId];
-}
-
-function updateBalance(userId, amount) {
-    if (!users[userId]) return;
-
-    users[userId].balance += amount;
-    saveUsers();
-
-    io.emit("balanceUpdateGlobal", {
-        userId,
-        balance: users[userId].balance
-    });
-}
 
 /* =======================
    SOCKET.IO
@@ -105,21 +60,33 @@ io.on('connection', (socket) => {
 
     console.log("Client connected:", socket.id);
 
-    /* ---------- AUTH ---------- */
-    socket.on('auth', ({ userId, username }) => {
-        socket.userId = userId;
-        socket.username = username;
+    /* =======================
+       AUTH (Telegram Login)
+    ======================= */
+    socket.on("auth", ({ telegramId }) => {
 
-        socketUsers.set(socket.id, userId);
+        if (!telegramId) return;
 
-        const user = getUserById(userId);
+        socket.telegramId = telegramId;
 
-        if (user) {
-            socket.emit('balanceUpdate', user.balance);
+        // CREATE USER IF NOT EXISTS
+        if (!users[telegramId]) {
+            users[telegramId] = {
+                userId: telegramId,
+                balance: 0
+            };
+            saveUsers();
         }
+
+        socketUsers.set(socket.id, telegramId);
+
+        // SEND BALANCE TO USER
+        socket.emit("balanceUpdate", users[telegramId].balance);
     });
 
-    /* ---------- SELECT CARD ---------- */
+    /* =======================
+       SELECT CARD
+    ======================= */
     socket.on('selectCard', ({ name, cardNumber }) => {
 
         if (!isLobbyOpen) {
@@ -135,19 +102,20 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (players[socket.id]) {
-            takenCards.delete(players[socket.id].cardNumber);
+        const telegramId = socket.telegramId;
+        if (!telegramId) {
+            socket.emit('joinError', 'Not authenticated');
+            return;
         }
 
         takenCards.add(num);
 
         players[socket.id] = {
             id: socket.id,
-            name: name || socket.username,
+            name: name || "Player",
             cardNumber: num,
             marked: new Array(25).fill(false),
-            userId: socket.userId,
-            username: socket.username
+            telegramId: telegramId
         };
 
         players[socket.id].marked[12] = true;
@@ -167,7 +135,9 @@ io.on('connection', (socket) => {
         );
     });
 
-    /* ---------- MARK NUMBER ---------- */
+    /* =======================
+       MARK NUMBER
+    ======================= */
     socket.on('markNumber', ({ cellIndex, number }) => {
 
         const player = players[socket.id];
@@ -182,15 +152,19 @@ io.on('connection', (socket) => {
         socket.emit('markConfirmed', { cellIndex, number });
     });
 
-    /* ---------- DISCONNECT ---------- */
+    /* =======================
+       DISCONNECT
+    ======================= */
     socket.on('disconnect', () => {
+
+        const telegramId = socketUsers.get(socket.id);
+
+        socketUsers.delete(socket.id);
 
         if (players[socket.id]) {
             takenCards.delete(players[socket.id].cardNumber);
             delete players[socket.id];
         }
-
-        socketUsers.delete(socket.id);
 
         io.emit('playersList',
             Object.values(players).map(p => ({
@@ -203,20 +177,18 @@ io.on('connection', (socket) => {
 });
 
 /* =======================
-   AUTH API (OPTIONAL)
+   API (Optional login/register)
 ======================= */
 app.post('/api/register', async (req, res) => {
     const { username, password } = req.body;
 
-    if (users[username]) {
-        return res.status(400).json({ error: "User exists" });
-    }
+    if (!username || !password)
+        return res.status(400).json({ error: "Missing fields" });
 
     const hashed = await bcrypt.hash(password, 10);
 
     users[username] = {
-        userId: uuidv4(),
-        username,
+        userId: username,
         password: hashed,
         balance: 10
     };
@@ -225,6 +197,22 @@ app.post('/api/register', async (req, res) => {
 
     res.json({ success: true });
 });
+
+/* =======================
+   BALANCE UPDATE FUNCTION
+======================= */
+function updateBalance(telegramId, amount) {
+
+    if (!users[telegramId]) return;
+
+    users[telegramId].balance += amount;
+    saveUsers();
+
+    io.emit("balanceUpdateGlobal", {
+        telegramId,
+        balance: users[telegramId].balance
+    });
+}
 
 /* =======================
    SERVER START

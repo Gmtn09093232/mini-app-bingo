@@ -1,20 +1,15 @@
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs-extra');
 
-/* ========= CONFIG ========= */
-const BOT_TOKEN = "8761020127:AAERE7_Od3JRMba00m0ER22rCE4Vz00clCg"; // ⚠️ change this
+const BOT_TOKEN = "8761020127:AAERE7_Od3JRMba00m0ER22rCE4Vz00clCg";
 const ADMIN_ID = 5423314276;
 const FRONTEND_URL = "https://mini-app-bingo.onrender.com";
 
-/* ========= INIT ========= */
 const bot = new Telegraf(BOT_TOKEN);
 
 const USERS_FILE = './users.json';
 const REQUESTS_FILE = './requests.json';
 
-const userStates = new Map();
-
-/* ========= LOAD FILES ========= */
 fs.ensureFileSync(USERS_FILE);
 fs.ensureFileSync(REQUESTS_FILE);
 
@@ -32,17 +27,25 @@ function saveRequests() {
   fs.writeJsonSync(REQUESTS_FILE, requests, { spaces: 2 });
 }
 
-/* ========= START ========= */
+/* =========================
+   TELEGRAM AUTO LOGIN USER
+========================= */
 bot.start((ctx) => {
-  const id = ctx.from.id;
+
+  const tgId = ctx.from.id;
   const username = ctx.from.username || "player";
 
-  if (!users[id]) {
-    users[id] = { id, username, balance: 0 };
+  // create user if not exists
+  if (!users[tgId]) {
+    users[tgId] = {
+      telegramId: tgId,
+      username,
+      balance: 0
+    };
     saveUsers();
   }
 
-  ctx.reply(`Welcome ${username}\nBalance: ${users[id].balance}`, {
+  ctx.reply(`Welcome ${username}\nBalance: ${users[tgId].balance}`, {
     reply_markup: {
       keyboard: [
         ["🎮 Play"],
@@ -54,21 +57,31 @@ bot.start((ctx) => {
   });
 });
 
-/* ========= PLAY ========= */
+/* =========================
+   PLAY BUTTON (LOGIN GAME)
+========================= */
 bot.hears("🎮 Play", (ctx) => {
+
+  const tgId = ctx.from.id;
   const username = ctx.from.username || "player";
-  const url = `${FRONTEND_URL}?tgId=${ctx.from.id}&username=${username}`;
+
+  const url = `${FRONTEND_URL}?tgId=${tgId}&username=${username}`;
 
   ctx.reply("🚀 Open Bingo Game:", {
     reply_markup: {
       inline_keyboard: [
-        [{ text: "▶️ Play Now", web_app: { url } }]
+        [{
+          text: "▶️ Play Now",
+          web_app: { url }
+        }]
       ]
     }
   });
 });
 
-/* ========= BALANCE ========= */
+/* =========================
+   BALANCE
+========================= */
 bot.hears("💰 Balance", (ctx) => {
   const user = users[ctx.from.id];
   if (!user) return ctx.reply("User not found");
@@ -76,20 +89,26 @@ bot.hears("💰 Balance", (ctx) => {
   ctx.reply(`💰 Balance: ${user.balance}`);
 });
 
-/* ========= DEPOSIT ========= */
+/* =========================
+   DEPOSIT / WITHDRAW
+========================= */
+const userStates = new Map();
+
 bot.hears("➕ Deposit", (ctx) => {
   userStates.set(ctx.from.id, "deposit");
   ctx.reply("Enter deposit amount:");
 });
 
-/* ========= WITHDRAW ========= */
 bot.hears("➖ Withdraw", (ctx) => {
   userStates.set(ctx.from.id, "withdraw");
   ctx.reply("Enter withdraw amount:");
 });
 
-/* ========= INPUT ========= */
+/* =========================
+   HANDLE AMOUNT INPUT
+========================= */
 bot.on("text", (ctx) => {
+
   const action = userStates.get(ctx.from.id);
   if (!action) return;
 
@@ -99,7 +118,7 @@ bot.on("text", (ctx) => {
   }
 
   const user = users[ctx.from.id];
-  if (!user) return ctx.reply("❌ User not found");
+  if (!user) return;
 
   if (action === "withdraw" && user.balance < amount) {
     return ctx.reply("❌ Not enough balance");
@@ -110,7 +129,7 @@ bot.on("text", (ctx) => {
     userId: ctx.from.id,
     username: user.username,
     type: action,
-    amount: amount,
+    amount,
     status: "pending"
   };
 
@@ -119,10 +138,12 @@ bot.on("text", (ctx) => {
 
   ctx.reply(`✅ Request sent for ${action}: ${amount}`);
 
-  /* SEND TO ADMIN */
   bot.telegram.sendMessage(
     ADMIN_ID,
-    `📥 New Request\nUser: ${user.username}\nType: ${action}\nAmount: ${amount}`,
+    `📥 New Request
+User: ${user.username}
+Type: ${action}
+Amount: ${amount}`,
     Markup.inlineKeyboard([
       [
         Markup.button.callback("✅ Approve", `approve_${request.id}`),
@@ -134,21 +155,27 @@ bot.on("text", (ctx) => {
   userStates.delete(ctx.from.id);
 });
 
-/* ========= ADMIN APPROVE ========= */
+/* =========================
+   ADMIN APPROVE
+========================= */
 bot.action(/approve_(\d+)/, (ctx) => {
+
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery("Not allowed");
 
   const id = Number(ctx.match[1]);
   const req = requests.find(r => r.id === id);
 
   if (!req) return ctx.answerCbQuery("Not found");
-  if (req.status !== "pending") return ctx.answerCbQuery("Already done");
+  if (req.status !== "pending") return ctx.answerCbQuery("Already processed");
 
   const user = users[req.userId];
-  if (!user) return ctx.answerCbQuery("User not found");
+  if (!user) return ctx.answerCbQuery("User missing");
 
-  if (req.type === "deposit") user.balance += req.amount;
-  if (req.type === "withdraw") user.balance -= req.amount;
+  if (req.type === "deposit") {
+    user.balance += req.amount;
+  } else if (req.type === "withdraw") {
+    user.balance -= req.amount;
+  }
 
   req.status = "approved";
 
@@ -157,27 +184,41 @@ bot.action(/approve_(\d+)/, (ctx) => {
 
   ctx.editMessageText("✅ Approved");
 
-  bot.telegram.sendMessage(req.userId, `✅ Your ${req.type} of ${req.amount} approved`);
+  bot.telegram.sendMessage(
+    req.userId,
+    `✅ ${req.type} of ${req.amount} approved`
+  );
+
+  /* IMPORTANT:
+     GAME WILL GET UPDATE VIA SOCKET SERVER (NOT BOT)
+  */
 });
 
-/* ========= ADMIN REJECT ========= */
+/* =========================
+   ADMIN REJECT
+========================= */
 bot.action(/reject_(\d+)/, (ctx) => {
+
   if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery("Not allowed");
 
   const id = Number(ctx.match[1]);
   const req = requests.find(r => r.id === id);
 
   if (!req) return ctx.answerCbQuery("Not found");
-  if (req.status !== "pending") return ctx.answerCbQuery("Already done");
 
   req.status = "rejected";
   saveRequests();
 
   ctx.editMessageText("❌ Rejected");
 
-  bot.telegram.sendMessage(req.userId, `❌ Your ${req.type} of ${req.amount} rejected`);
+  bot.telegram.sendMessage(
+    req.userId,
+    `❌ ${req.type} rejected`
+  );
 });
 
-/* ========= START ========= */
+/* =========================
+   START BOT
+========================= */
 bot.launch();
 console.log("🤖 Bot running...");
