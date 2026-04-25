@@ -1,177 +1,120 @@
-const { Telegraf } = require('telegraf');
-const { Pool } = require('pg');
 
-/* =======================
-   CONFIG (REPLACE THESE)
-======================= */
-const BOT_TOKEN = "8728360769:AAHhvEWPqQ39d88v3rSa7dYWYrL5bqFKZrw";
+const { Telegraf } = require('telegraf');
+const fs = require('fs-extra');
+
+/* ========= CONFIG ========= */
+const BOT_TOKEN = "8728360769:AAHhvEWPqQ39d88v3rSa7dYWYrL5bqFKZrw"; // <-- change this
 const FRONTEND_URL = "https://mini-app-bingo.onrender.com";
 
-/* =======================
-   SUPABASE DB (PostgreSQL)
-======================= */
-const pool = new Pool({
-    connectionString: "postgresql://postgres:yA6Hy3ZiRHbIMhoh@db.rmzourfcjodclcowbuhs.supabase.co:5432/postgres",
-    ssl: { rejectUnauthorized: false }
-});
-
-/* =======================
-   BOT INIT
-======================= */
+/* ========= INIT ========= */
 const bot = new Telegraf(BOT_TOKEN);
+const USERS_FILE = './users.json';
 const userStates = new Map();
 
-/* =======================
-   START
-======================= */
-bot.start(async (ctx) => {
-    const tgId = ctx.from.id;
-    const username = ctx.from.username || "player";
+/* ========= LOAD USERS ========= */
+fs.ensureFileSync(USERS_FILE);
+let users = {};
 
-    try {
-        await pool.query(
-            `INSERT INTO users (telegram_id, username)
-             VALUES ($1, $2)
-             ON CONFLICT (telegram_id) DO NOTHING`,
-            [tgId, username]
-        );
+try {
+  users = fs.readJsonSync(USERS_FILE);
+} catch {
+  users = {};
+}
 
-        ctx.reply("🎮 Welcome to Bingo!", {
-            reply_markup: {
-                keyboard: [
-                    ["🎮 Play"],
-                    ["💰 Balance"],
-                    ["➕ Deposit", "➖ Withdraw"]
-                ],
-                resize_keyboard: true
-            }
-        });
+function saveUsers() {
+  fs.writeJsonSync(USERS_FILE, users, { spaces: 2 });
+}
 
-    } catch (err) {
-        console.error("DB ERROR:", err.message);
-        ctx.reply("❌ Database error");
+/* ========= START ========= */
+bot.start((ctx) => {
+  const id = ctx.from.id;
+  const username = ctx.from.username || "player";
+
+  if (!users[id]) {
+    users[id] = {
+      id: id,
+      username: username,
+      balance: 0
+    };
+    saveUsers();
+  }
+
+  ctx.reply(`Welcome ${username}\nBalance: ${users[id].balance}`, {
+    reply_markup: {
+      keyboard: [
+        ["Play"],
+        ["Balance"],
+        ["Deposit", "Withdraw"]
+      ],
+      resize_keyboard: true
     }
+  });
 });
 
-/* =======================
-   PLAY BUTTON
-======================= */
-bot.hears("🎮 Play", (ctx) => {
-    const url = `${FRONTEND_URL}?tgId=${ctx.from.id}&username=${ctx.from.username}`;
+/* ========= PLAY ========= */
+bot.hears("Play", (ctx) => {
+  const url = `${FRONTEND_URL}?tgId=${ctx.from.id}&username=${ctx.from.username}`;
 
-    ctx.reply("🚀 Open game:", {
-        reply_markup: {
-            inline_keyboard: [
-                [{ text: "▶️ Play Now", web_app: { url } }]
-            ]
-        }
-    });
-});
-
-/* =======================
-   BALANCE
-======================= */
-bot.hears("💰 Balance", async (ctx) => {
-    try {
-        const result = await pool.query(
-            "SELECT balance FROM users WHERE telegram_id=$1",
-            [ctx.from.id]
-        );
-
-        if (!result.rows.length)
-            return ctx.reply("❌ User not found");
-
-        ctx.reply(`💰 Balance: ${result.rows[0].balance}`);
-
-    } catch (err) {
-        console.error(err.message);
-        ctx.reply("❌ Error getting balance");
+  ctx.reply("Open game:", {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "Play Now", web_app: { url } }]
+      ]
     }
+  });
 });
 
-/* =======================
-   DEPOSIT
-======================= */
-bot.hears("➕ Deposit", (ctx) => {
-    userStates.set(ctx.from.id, { action: "deposit" });
-    ctx.reply("Enter deposit amount:");
+/* ========= BALANCE ========= */
+bot.hears("Balance", (ctx) => {
+  const user = users[ctx.from.id];
+  if (!user) return ctx.reply("User not found");
+
+  ctx.reply(`Balance: ${user.balance}`);
 });
 
-/* =======================
-   WITHDRAW
-======================= */
-bot.hears("➖ Withdraw", (ctx) => {
-    userStates.set(ctx.from.id, { action: "withdraw" });
-    ctx.reply("Enter withdraw amount:");
+/* ========= DEPOSIT ========= */
+bot.hears("Deposit", (ctx) => {
+  userStates.set(ctx.from.id, "deposit");
+  ctx.reply("Enter amount:");
 });
 
-/* =======================
-   INPUT HANDLER
-======================= */
-bot.on("text", async (ctx) => {
-    const state = userStates.get(ctx.from.id);
-    if (!state) return;
+/* ========= WITHDRAW ========= */
+bot.hears("Withdraw", (ctx) => {
+  userStates.set(ctx.from.id, "withdraw");
+  ctx.reply("Enter amount:");
+});
 
-    const amount = parseFloat(ctx.message.text);
-    if (isNaN(amount) || amount <= 0)
-        return ctx.reply("❌ Invalid amount");
+/* ========= INPUT ========= */
+bot.on("text", (ctx) => {
+  const action = userStates.get(ctx.from.id);
+  if (!action) return;
 
-    try {
-        const result = await pool.query(
-            "SELECT id, balance FROM users WHERE telegram_id=$1",
-            [ctx.from.id]
-        );
+  const amount = parseFloat(ctx.message.text);
+  if (isNaN(amount) || amount <= 0) {
+    return ctx.reply("Invalid amount");
+  }
 
-        if (!result.rows.length)
-            return ctx.reply("❌ User not found");
+  const user = users[ctx.from.id];
+  if (!user) return ctx.reply("User not found");
 
-        const user = result.rows[0];
+  if (action === "deposit") {
+    user.balance += amount;
+    saveUsers();
+    ctx.reply(`Deposited ${amount}`);
+  }
 
-        /* =======================
-           DEPOSIT
-        ======================= */
-        if (state.action === "deposit") {
-            await pool.query(
-                "UPDATE users SET balance = balance + $1 WHERE id=$2",
-                [amount, user.id]
-            );
-
-            ctx.reply(`✅ Deposited ${amount}`);
-        }
-
-        /* =======================
-           WITHDRAW
-        ======================= */
-        if (state.action === "withdraw") {
-
-            if (user.balance < amount)
-                return ctx.reply("❌ Not enough balance");
-
-            await pool.query(
-                "UPDATE users SET balance = balance - $1 WHERE id=$2",
-                [amount, user.id]
-            );
-
-            ctx.reply(`✅ Withdrawn ${amount}`);
-        }
-
-    } catch (err) {
-        console.error(err.message);
-        ctx.reply("❌ Transaction error");
+  if (action === "withdraw") {
+    if (user.balance < amount) {
+      return ctx.reply("Not enough balance");
     }
+    user.balance -= amount;
+    saveUsers();
+    ctx.reply(`Withdrawn ${amount}`);
+  }
 
-    userStates.delete(ctx.from.id);
+  userStates.delete(ctx.from.id);
 });
 
-/* =======================
-   ERROR HANDLER
-======================= */
-bot.catch((err) => {
-    console.error("BOT ERROR:", err);
-});
-
-/* =======================
-   START BOT
-======================= */
+/* ========= START BOT ========= */
 bot.launch();
-console.log("🤖 Bot running...");
+console.log("Bot running...");

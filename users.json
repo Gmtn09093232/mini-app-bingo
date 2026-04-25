@@ -1,9 +1,33 @@
 {
+  "1487144638": {
+    "id": 1487144638,
+    "username": "desaleg69",
+    "balance": 200
+  },
   "gizie": {
     "userId": "77a84c34-9cd8-444f-aa78-3509de4affcb",
     "username": "gizie",
     "password": "$2b$10$PBOuOgAFlf3AZrNPdNfNsent1aOxxlpAtkAeUV3Y8UD7McnNzFlU6",
-    "balance": 100,
+    "balance": 90,
     "createdAt": "2026-04-18T07:44:04.614Z"
+  },
+  "mk": {
+    "userId": "b7387b60-2d66-4185-9e77-ecf19433fa5e",
+    "username": "mk",
+    "password": "$2b$10$2JT/JfhmJjofXWfxgJh6j.HcW2jDwPIrDu8EFe2kmyeNd5scQIbre",
+    "balance": 0,
+    "createdAt": "2026-04-23T08:57:11.603Z"
+  },
+  "ghj": {
+    "userId": "98e780ec-9aaf-4149-808d-d82a9c8858d9",
+    "username": "ghj",
+    "password": "$2b$10$TolIAkFTZqqq.7OlAQOFs.dd2p2FZDQY..47KHlszYw5sq0NKq6Ii",
+    "balance": 10,
+    "createdAt": "2026-04-25T05:03:18.015Z"
+  },
+  "5423314276": {
+    "id": 5423314276,
+    "username": "giziemelkamu129",
+    "balance": 2100
   }
 }

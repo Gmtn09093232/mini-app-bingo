@@ -1,5 +1,16 @@
+const { neon } = require('@neondatabase/serverless');
+
 const { Pool } = require('pg');
+
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error("❌ DATABASE_URL is missing in .env");
+}
+
 const pool = new Pool({
-    connectionString: "postgresql://postgres:yA6Hy3ZiRHbIMhoh@db.rmzourfcjodclcowbuhs.supabase.co:5432/postgres",
-    ssl: { rejectUnauthorized: false }
+  connectionString,
+  ssl: { rejectUnauthorized: false }
 });
+
+module.exports = pool;

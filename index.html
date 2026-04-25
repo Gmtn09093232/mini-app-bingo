@@ -177,267 +177,242 @@
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-    let socket = null;
-    let currentUser = null;
-    let myCardData = [];
-    let markedCells = new Array(25).fill(false);
-    let gameActive = false;
-    let myPlayerId = null;
-    let mySelectedCard = null;
-    let availableCards = new Set();
-    let isLobbyOpen = true;
+let socket = null;
+let currentUser = null;
+let myCardData = [];
+let markedCells = new Array(25).fill(false);
+let gameActive = false;
+let myPlayerId = null;
+let mySelectedCard = null;
+let availableCards = new Set();
+let isLobbyOpen = true;
 
-    // DOM elements
-    const authPanel = document.getElementById('authPanel');
-    const gamePanel = document.getElementById('gamePanel');
-    const balanceSpan = document.getElementById('balanceAmount');
-    const cardsGrid = document.getElementById('cardsGrid');
-    const lobbyArea = document.getElementById('lobbyArea');
-    const gameArea = document.getElementById('gameArea');
-    const countdownDisplay = document.getElementById('countdownDisplay');
-    const playersListDiv = document.getElementById('playersList');
-    const playersListPage1 = document.getElementById('playersListPage1');
-    const lastCalledSpan = document.getElementById('lastCalled');
-    const winnerMsgDiv = document.getElementById('winnerMessage');
-    const myCardDiv = document.getElementById('myCard');
-    const masterBoardDiv = document.getElementById('masterBoard');
-    const authError = document.getElementById('authError');
-    const prizeBox = document.getElementById('prizeBox');
+/* =========================
+   GET TELEGRAM DATA
+========================= */
+const params = new URLSearchParams(window.location.search);
+const tgId = params.get("tgId");
+const username = params.get("username") || "player";
 
-    async function apiCall(endpoint, method, body) {
-        const res = await fetch(endpoint, {
-            method,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        return res.json();
-    }
+/* =========================
+   INIT SOCKET (SAFE)
+========================= */
+function initSocket() {
+    if (socket) socket.disconnect();
 
-    // Login / Register
-    document.getElementById('loginBtn').onclick = async () => {
-        const username = document.getElementById('loginUsername').value.trim();
-        const password = document.getElementById('loginPassword').value;
-        if (!username || !password) { authError.innerText = 'Fill all fields'; return; }
-        const data = await apiCall('/api/login', 'POST', { username, password });
-        if (data.error) { authError.innerText = data.error; return; }
-        currentUser = { username: data.username };
-        balanceSpan.innerText = data.balance;
-        initSocket(data.username);
-        showGamePanel();
-    };
-    document.getElementById('registerBtn').onclick = async () => {
-        const username = document.getElementById('loginUsername').value.trim();
-        const password = document.getElementById('loginPassword').value;
-        if (!username || !password) { authError.innerText = 'Fill all fields'; return; }
-        const data = await apiCall('/api/register', 'POST', { username, password });
-        if (data.error) { authError.innerText = data.error; return; }
-        currentUser = { username: data.username };
-        balanceSpan.innerText = data.balance;
-        initSocket(data.username);
-        showGamePanel();
-    };
-    document.getElementById('logoutBtn').onclick = async () => {
-        await apiCall('/api/logout', 'POST', {});
-        if (socket) socket.disconnect();
-        showAuthPanel();
-        currentUser = null;
-    };
+    socket = io();
 
-    function showGamePanel() { gamePanel.classList.remove('hidden'); authPanel.classList.add('hidden'); }
-    function showAuthPanel() { gamePanel.classList.add('hidden'); authPanel.classList.remove('hidden'); }
+    socket.on('connect', () => {
+        console.log("Connected");
 
-    // Deposit / Withdraw modal
-    const modal = document.getElementById('transactionModal');
-    const modalTitle = document.getElementById('modalTitle');
-    const txnAmount = document.getElementById('txnAmount');
-    let currentTxnType = '';
-    document.getElementById('depositBtn').onclick = () => { currentTxnType = 'deposit'; modalTitle.innerText = 'Deposit Credits'; modal.style.display = 'flex'; };
-    document.getElementById('withdrawBtn').onclick = () => { currentTxnType = 'withdraw'; modalTitle.innerText = 'Withdraw Credits'; modal.style.display = 'flex'; };
-    document.getElementById('txnConfirmBtn').onclick = async () => {
-        const amount = parseFloat(txnAmount.value);
-        if (isNaN(amount) || amount <= 0) { document.getElementById('txnError').innerText = 'Invalid amount'; return; }
-        const endpoint = currentTxnType === 'deposit' ? '/api/deposit' : '/api/withdraw';
-        const data = await apiCall(endpoint, 'POST', { amount });
-        if (data.error) { document.getElementById('txnError').innerText = data.error; return; }
-        balanceSpan.innerText = data.newBalance;
-        modal.style.display = 'none';
-        txnAmount.value = '';
-        document.getElementById('txnError').innerText = '';
-        alert(`${currentTxnType} successful! New balance: ${data.newBalance} credits`);
-    };
-    document.getElementById('txnCancelBtn').onclick = () => { modal.style.display = 'none'; txnAmount.value = ''; };
+        socket.emit("auth", {
+            userId: tgId,
+            username: username
+        });
+    });
 
-    // Socket.IO
-    function initSocket(username) {
-        if (socket) socket.disconnect();
-        socket = io();
-        socket.on('connect', () => {
-            socket.emit('auth', { userId: username, username });
-        });
-        socket.on('balanceUpdate', (balance) => { balanceSpan.innerText = balance; });
-        socket.on('availableCards', (avail) => {
-            availableCards = new Set(avail);
-            renderCardGrid();
-        });
-        socket.on('lobbyState', ({ isLobbyOpen: lobbyOpen, countdown, gameActive: active }) => {
-            isLobbyOpen = lobbyOpen;
-            if (lobbyOpen) {
-                lobbyArea.style.display = 'block';
-                gameArea.style.display = 'none';
-                if (countdown > 0) countdownDisplay.innerText = `Game starts in ${countdown}s`;
-                else countdownDisplay.innerText = "Waiting for players...";
-            } else {
-                lobbyArea.style.display = 'none';
-                gameArea.style.display = 'block';
-                buildMasterBoard();
-                resetMasterHighlights();
-            }
-        });
-        socket.on('countdownTick', (seconds) => {
-            if (seconds > 0) countdownDisplay.innerText = `Game starts in ${seconds}s`;
-            else countdownDisplay.innerText = "Starting!";
-        });
-        socket.on('lobbyReset', ({ countdown }) => {
-            lobbyArea.style.display = 'block';
-            gameArea.style.display = 'none';
-            gameActive = false;
-            myCardData = [];
-            markedCells = [];
-            mySelectedCard = null;
-            winnerMsgDiv.innerHTML = "";
-            countdownDisplay.innerText = `Game starts in ${countdown}s`;
-        });
-        socket.on('cardAssigned', (data) => {
-            myPlayerId = data.playerId;
-            myCardData = data.card;
-            markedCells = new Array(25).fill(false);
-            for (let i = 0; i < myCardData.length; i++) if (myCardData[i] === "FREE") markedCells[i] = true;
-            gameActive = data.gameActive;
-            renderMyCard();
-            if (!gameActive) resetMasterHighlights();
-        });
-        socket.on('gameStarted', () => {
-            gameActive = true;
-            lobbyArea.style.display = 'none';
-            gameArea.style.display = 'block';
-            resetMasterHighlights();
-            winnerMsgDiv.innerHTML = "";
-            lastCalledSpan.innerText = "🎲 --";
-        });
-        socket.on('newNumber', (number) => {
-            const letter = number <= 15 ? 'B' : number <= 30 ? 'I' : number <= 45 ? 'N' : number <= 60 ? 'G' : 'O';
-            lastCalledSpan.innerText = `${letter} - ${number}`;
-            highlightMasterNumber(number);
-        });
-        socket.on('markConfirmed', ({ cellIndex }) => {
-            markedCells[cellIndex] = true;
-            renderMyCard();
-        });
-        socket.on('gameWinner', (data) => {
-            alert(`🏆 ${data.winnerName} wins!\n💰 Prize: ${data.prize} credits\n👥 Players: ${data.players}`);
-            winnerMsgDiv.innerHTML = `<div class="winner-toast">🏆 ${data.winnerName} won ${data.prize} credits! 🏆</div>`;
-        });
-        socket.on('prizeUpdate', (data) => {
-            if (prizeBox) prizeBox.innerText = `Prize: ${data.prize} (${data.players} players)`;
-        });
-        socket.on('playersList', (players) => {
-            const html = players.map(p => `<span class="player-tag">${escapeHtml(p.name)} (card ${p.cardNumber})</span>`).join('');
-            playersListDiv.innerHTML = html;
-            playersListPage1.innerHTML = html;
-        });
-        socket.on('joinError', (msg) => alert(msg));
-        socket.on('error', (msg) => alert(msg));
-        socket.on('disconnect', () => alert("Disconnected from server."));
-    }
+    /* =========================
+       BALANCE LIVE SYNC
+    ========================= */
+    socket.on('balanceUpdate', (balance) => {
+        document.getElementById("balanceAmount").innerText = balance;
+    });
 
-    function renderCardGrid() {
-        cardsGrid.innerHTML = '';
-        for (let i = 1; i <= 100; i++) {
-            const btn = document.createElement('button');
-            btn.textContent = i;
-            btn.classList.add('card-btn');
-            if (!availableCards.has(i) && mySelectedCard !== i) btn.classList.add('taken');
-            if (mySelectedCard === i) btn.classList.add('selected');
-            btn.disabled = (!availableCards.has(i) && mySelectedCard !== i) || !isLobbyOpen;
-            btn.onclick = () => selectCard(i);
-            cardsGrid.appendChild(btn);
+    socket.on("balanceUpdateGlobal", (data) => {
+        if (data.userId == tgId) {
+            document.getElementById("balanceAmount").innerText = data.balance;
         }
-    }
+    });
 
-    function selectCard(cardNum) {
-        if (!isLobbyOpen) { alert("Game already started, cannot change card."); return; }
-        if (!availableCards.has(cardNum) && mySelectedCard !== cardNum) { alert(`Card ${cardNum} is already taken.`); return; }
-        mySelectedCard = cardNum;
-        socket.emit('selectCard', { name: currentUser.username, cardNumber: cardNum });
-    }
+    /* =========================
+       CARDS
+    ========================= */
+    socket.on('availableCards', (avail) => {
+        availableCards = new Set(avail);
+        renderCardGrid();
+    });
 
-    function renderMyCard() {
-        if (!myCardData.length) return;
-        let html = `<table class="bingo-table"><thead><tr>${['B','I','N','G','O'].map(l => `<th>${l}</th>`).join('')}</tr></thead><tbody>`;
-        for (let row = 0; row < 5; row++) {
-            html += `<tr>`;
-            for (let col = 0; col < 5; col++) {
-                let idx = row * 5 + col;
-                let value = myCardData[idx];
-                let isMarked = markedCells[idx];
-                let cellClass = "";
-                if (value === "FREE") { cellClass = "free-cell"; isMarked = true; }
-                if (isMarked && value !== "FREE") cellClass = "marked-cell";
-                html += `<td class="${cellClass}" data-cellidx="${idx}" data-value="${value}">${value === "FREE" ? "★" : value}</td>`;
-            }
-            html += `</tr>`;
+    socket.on('cardAssigned', (data) => {
+        myPlayerId = data.playerId;
+        myCardData = data.card || [];
+        markedCells = new Array(25).fill(false);
+
+        for (let i = 0; i < myCardData.length; i++) {
+            if (myCardData[i] === "FREE") markedCells[i] = true;
         }
-        html += `</tbody></table>`;
-        myCardDiv.innerHTML = html;
-        document.querySelectorAll('#myCard td').forEach(td => {
-            td.addEventListener('click', (e) => {
-                const idx = parseInt(td.dataset.cellidx);
-                const val = td.dataset.value;
-                if (val === "FREE") return;
-                if (!gameActive) { alert("Game not active yet!"); return; }
-                if (markedCells[idx]) { alert("Already marked!"); return; }
-                socket.emit('markNumber', { cellIndex: idx, number: parseInt(val) });
-            });
-        });
-    }
 
-    function buildMasterBoard() {
-        masterBoardDiv.innerHTML = "";
-        for (let i = 1; i <= 75; i++) {
-            const cell = document.createElement("div");
-            cell.id = `master_${i}`;
-            cell.className = "cell";
-            cell.innerText = i;
-            masterBoardDiv.appendChild(cell);
-        }
-    }
+        renderMyCard();
+    });
 
-    function highlightMasterNumber(num) {
-        const cell = document.getElementById(`master_${num}`);
-        if (cell) cell.classList.add("called");
-    }
+    /* =========================
+       GAME STATE
+    ========================= */
+    socket.on('gameStarted', () => {
+        gameActive = true;
+        document.getElementById("lobbyArea").style.display = "none";
+        document.getElementById("gameArea").style.display = "block";
+        resetMasterHighlights();
+    });
 
-    function resetMasterHighlights() {
-        for (let i = 1; i <= 75; i++) {
-            const cell = document.getElementById(`master_${i}`);
-            if (cell) cell.classList.remove("called");
-        }
-    }
-function logout() {
-  fetch("/logout", { method: "POST" })
-    .then(res => res.json())
-    .then(() => {
-      socket.emit("logout");
+    socket.on('lobbyReset', ({ countdown }) => {
+        gameActive = false;
+        document.getElementById("lobbyArea").style.display = "block";
+        document.getElementById("gameArea").style.display = "none";
+    });
+
+    socket.on('newNumber', (number) => {
+        highlightMasterNumber(number);
+    });
+
+    socket.on('markConfirmed', ({ cellIndex }) => {
+        markedCells[cellIndex] = true;
+        renderMyCard();
+    });
+
+    socket.on('playersList', (players) => {
+        const html = players.map(p =>
+            `<span class="player-tag">${p.name} (card ${p.cardNumber})</span>`
+        ).join('');
+
+        document.getElementById("playersList").innerHTML = html;
+        document.getElementById("playersListPage1").innerHTML = html;
+    });
+
+    socket.on('gameWinner', (data) => {
+        alert(`🏆 ${data.winnerName} won ${data.prize}`);
+    });
+
+    socket.on('joinError', (msg) => alert(msg));
+}
+
+/* =========================
+   START SOCKET
+========================= */
+initSocket();
+
+/* =========================
+   CARD SELECT
+========================= */
+function selectCard(cardNum) {
+    if (!socket) return;
+    if (!availableCards.has(cardNum)) return;
+
+    mySelectedCard = cardNum;
+
+    socket.emit('selectCard', {
+        name: username,
+        cardNumber: cardNum
     });
 }
 
-socket.on("loggedOut", () => {
-  socket.disconnect();
-  window.location.href = "/login";
-});
-    function escapeHtml(str) { return str.replace(/[&<>]/g, function(m) { if (m === '&') return '&amp;'; if (m === '<') return '&lt;'; if (m === '>') return '&gt;'; return m; }); }
+/* =========================
+   RENDER GRID
+========================= */
+function renderCardGrid() {
+    const grid = document.getElementById("cardsGrid");
+    grid.innerHTML = "";
 
-    buildMasterBoard(); // initial empty board
+    for (let i = 1; i <= 100; i++) {
+        const btn = document.createElement("button");
+        btn.textContent = i;
+        btn.className = "card-btn";
+
+        if (!availableCards.has(i)) btn.classList.add("taken");
+        if (mySelectedCard === i) btn.classList.add("selected");
+
+        btn.onclick = () => selectCard(i);
+        grid.appendChild(btn);
+    }
+}
+
+/* =========================
+   RENDER MY CARD
+========================= */
+function renderMyCard() {
+    const cardDiv = document.getElementById("myCard");
+    if (!myCardData.length) return;
+
+    let html = `<table class="bingo-table"><tbody>`;
+
+    for (let r = 0; r < 5; r++) {
+        html += "<tr>";
+        for (let c = 0; c < 5; c++) {
+            let idx = r * 5 + c;
+            let val = myCardData[idx];
+            let marked = markedCells[idx];
+
+            let cls = marked ? "marked-cell" : "";
+            if (val === "FREE") cls = "free-cell";
+
+            html += `<td class="${cls}" data-i="${idx}">
+                ${val === "FREE" ? "★" : val}
+            </td>`;
+        }
+        html += "</tr>";
+    }
+
+    html += "</tbody></table>";
+    cardDiv.innerHTML = html;
+
+    document.querySelectorAll("#myCard td").forEach(td => {
+        td.onclick = () => {
+            let idx = td.dataset.i;
+            let val = myCardData[idx];
+
+            if (!gameActive) return alert("Game not started");
+            if (val === "FREE") return;
+
+            socket.emit("markNumber", {
+                cellIndex: parseInt(idx),
+                number: parseInt(val)
+            });
+        };
+    });
+}
+
+/* =========================
+   MASTER BOARD
+========================= */
+function highlightMasterNumber(num) {
+    let el = document.getElementById("master_" + num);
+    if (el) el.classList.add("called");
+}
+
+function resetMasterHighlights() {
+    for (let i = 1; i <= 75; i++) {
+        let el = document.getElementById("master_" + i);
+        if (el) el?.classList.remove("called");
+    }
+}
+
+/* =========================
+   LOGOUT SAFE
+========================= */
+function logout() {
+    fetch("/api/logout", { method: "POST" })
+        .then(() => {
+            if (socket) socket.disconnect();
+            window.location.reload();
+        });
+}
+
+/* =========================
+   INIT BOARD
+========================= */
+function buildMasterBoard() {
+    const board = document.getElementById("masterBoard");
+    board.innerHTML = "";
+
+    for (let i = 1; i <= 75; i++) {
+        let div = document.createElement("div");
+        div.id = "master_" + i;
+        div.className = "cell";
+        div.innerText = i;
+        board.appendChild(div);
+    }
+}
+
+buildMasterBoard();
 </script>
 </body>
 </html>

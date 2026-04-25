@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1777095205159,
+    "userId": 5423314276,
+    "username": "giziemelkamu129",
+    "type": "deposit",
+    "amount": 200,
+    "status": "rejected"
+  },
+  {
+    "id": 1777095871916,
+    "userId": 5423314276,
+    "username": "giziemelkamu129",
+    "type": "deposit",
+    "amount": 200,
+    "status": "approved"
+  },
+  {
+    "id": 1777095982191,
+    "userId": 1487144638,
+    "username": "desaleg69",
+    "type": "deposit",
+    "amount": 200,
+    "status": "approved"
+  }
+]
