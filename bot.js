@@ -1,12 +1,15 @@
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs-extra');
 
-const BOT_TOKEN = "8687947415:AAEnyvS8LMx3QYWsEaMhX6kB8phSWS4a550";
+const BOT_TOKEN = "8687947415:AAEnyvS8LMx3QYWsEaMhX6kB8phSWS4a550"; // 🔴 DO NOT expose real token
 const ADMIN_ID = 5423314276;
 const FRONTEND_URL = "https://mini-app-bingo.onrender.com";
 
 const bot = new Telegraf(BOT_TOKEN);
 
+// =========================
+// FILES
+// =========================
 const USERS_FILE = './users.json';
 const REQUESTS_FILE = './requests.json';
 
@@ -27,39 +30,51 @@ function saveRequests() {
   fs.writeJsonSync(REQUESTS_FILE, requests, { spaces: 2 });
 }
 
-/* =========================
-   TELEGRAM AUTO LOGIN USER
-========================= */
-bot.start((ctx) => {
-  const tgId = String(ctx.from.id);
-  const username = ctx.from.username || "player";
-
-  if (!users[tgId]) {
-    users[tgId] = {
-      telegramId: tgId,
-      username,
+// =========================
+// SAFE USER GETTER (FIXED BUG)
+// =========================
+function getUser(id) {
+  const key = String(id);
+  if (!users[key]) {
+    users[key] = {
+      telegramId: key,
+      username: "player",
       balance: 0
     };
     saveUsers();
   }
+  return users[key];
+}
 
-  const user = users[tgId];
+// =========================
+// START
+// =========================
+bot.start((ctx) => {
+  const tgId = String(ctx.from.id);
+  const username = ctx.from.username || "player";
 
-  ctx.reply(`Welcome ${username}\nBalance: ${user.balance}`, {
-    reply_markup: {
-      keyboard: [
-        ["🎮 Play"],
-        ["💰 Balance"],
-        ["➕ Deposit", "➖ Withdraw"]
-      ],
-      resize_keyboard: true
+  const user = getUser(tgId);
+  user.username = username;
+  saveUsers();
+
+  ctx.reply(
+    `Welcome ${username}\nBalance: ${user.balance}`,
+    {
+      reply_markup: {
+        keyboard: [
+          ["🎮 Play"],
+          ["💰 Balance"],
+          ["➕ Deposit", "➖ Withdraw"]
+        ],
+        resize_keyboard: true
+      }
     }
-  });
+  );
 });
 
-/* =========================
-   PLAY BUTTON (SECURE LOGIN)
-========================= */
+// =========================
+// PLAY
+// =========================
 bot.hears("🎮 Play", (ctx) => {
   ctx.reply("🚀 Open Bingo Game:", {
     reply_markup: {
@@ -67,7 +82,7 @@ bot.hears("🎮 Play", (ctx) => {
         {
           text: "▶️ Play Now",
           web_app: {
-            url: `${FRONTEND_URL}?tgId=${ctx.from.id}`
+            url: `${FRONTEND_URL}`
           }
         }
       ]]
@@ -75,46 +90,48 @@ bot.hears("🎮 Play", (ctx) => {
   });
 });
 
-/* =========================
-   BALANCE
-========================= */
+// =========================
+// BALANCE
+// =========================
 bot.hears("💰 Balance", (ctx) => {
-  const user = users[ctx.from.id];
-  if (!user) return ctx.reply("User not found");
-
+  const user = getUser(ctx.from.id);
   ctx.reply(`💰 Balance: ${user.balance}`);
 });
 
-/* =========================
-   DEPOSIT / WITHDRAW
-========================= */
+// =========================
+// STATES
+// =========================
 const userStates = new Map();
 
+// =========================
+// DEPOSIT
+// =========================
 bot.hears("➕ Deposit", (ctx) => {
   userStates.set(ctx.from.id, "deposit");
   ctx.reply("Enter deposit amount:");
 });
 
+// =========================
+// WITHDRAW
+// =========================
 bot.hears("➖ Withdraw", (ctx) => {
   userStates.set(ctx.from.id, "withdraw");
   ctx.reply("Enter withdraw amount:");
 });
 
-/* =========================
-   HANDLE AMOUNT INPUT
-========================= */
+// =========================
+// HANDLE AMOUNT INPUT (FIXED)
+// =========================
 bot.on("text", (ctx) => {
   const action = userStates.get(ctx.from.id);
   if (!action) return;
 
   const amount = Number(ctx.message.text);
-
   if (!Number.isFinite(amount) || amount <= 0) {
     return ctx.reply("❌ Invalid amount");
   }
 
   const user = getUser(ctx.from.id);
-  if (!user) return;
 
   if (action === "withdraw" && user.balance < amount) {
     return ctx.reply("❌ Not enough balance");
@@ -122,7 +139,7 @@ bot.on("text", (ctx) => {
 
   const request = {
     id: Date.now(),
-    userId: ctx.from.id,
+    userId: String(ctx.from.id),
     username: user.username,
     type: action,
     amount,
@@ -136,12 +153,14 @@ bot.on("text", (ctx) => {
 
   userStates.delete(ctx.from.id);
 });
-/* =========================
-   ADMIN APPROVE
-========================= */
-bot.action(/approve_(\d+)/, (ctx) => {
 
-  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery("Not allowed");
+// =========================
+// ADMIN APPROVE
+// =========================
+bot.action(/approve_(\d+)/, (ctx) => {
+  if (ctx.from.id !== ADMIN_ID) {
+    return ctx.answerCbQuery("Not allowed");
+  }
 
   const id = Number(ctx.match[1]);
   const req = requests.find(r => r.id === id);
@@ -149,8 +168,7 @@ bot.action(/approve_(\d+)/, (ctx) => {
   if (!req) return ctx.answerCbQuery("Not found");
   if (req.status !== "pending") return ctx.answerCbQuery("Already processed");
 
-  const user = users[req.userId];
-  if (!user) return ctx.answerCbQuery("User missing");
+  const user = getUser(req.userId);
 
   if (req.type === "deposit") {
     user.balance += req.amount;
@@ -171,12 +189,13 @@ bot.action(/approve_(\d+)/, (ctx) => {
   );
 });
 
-/* =========================
-   ADMIN REJECT
-========================= */
+// =========================
+// ADMIN REJECT
+// =========================
 bot.action(/reject_(\d+)/, (ctx) => {
-
-  if (ctx.from.id !== ADMIN_ID) return ctx.answerCbQuery("Not allowed");
+  if (ctx.from.id !== ADMIN_ID) {
+    return ctx.answerCbQuery("Not allowed");
+  }
 
   const id = Number(ctx.match[1]);
   const req = requests.find(r => r.id === id);
@@ -194,8 +213,8 @@ bot.action(/reject_(\d+)/, (ctx) => {
   );
 });
 
-/* =========================
-   START BOT
-========================= */
+// =========================
+// START BOT
+// =========================
 bot.launch();
 console.log("🤖 Bot running...");

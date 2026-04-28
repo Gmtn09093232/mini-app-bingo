@@ -1,261 +1,222 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>BINGO · Telegram Mini App</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script> 
-    <style>
-        * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
-        body {
-            font-family: 'Segoe UI', system-ui;
-            background: linear-gradient(145deg, #0a0f1e 0%, #0d1b2a 100%);
-            color: #f0f3fa;
-            margin: 0;
-            padding: 20px;
-            min-height: 100vh;
-        }
-        .container { max-width: 1300px; margin: 0 auto; }
-        .auth-panel, .game-panel {
-            background: #11212ecc;
-            -webkit-backdrop-filter: blur(8px);
-            backdrop-filter: blur(8px);
-            border-radius: 48px;
-            padding: 25px;
-            margin: 20px auto;
-            text-align:center;
-        }
-        .balance-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #0a1620;
-            border-radius: 60px;
-            padding: 8px 20px;
-            margin-bottom: 20px;
-        }
-        button {
-            background: #2c3e4e;
-            border: none;
-            color: white;
-            padding: 8px 18px;
-            border-radius: 40px;
-            cursor: pointer;
-        }
-        button.primary { background: #e67e22; }
-        button.danger { background: #7f2a2a; }
-        .cards-grid {
-            display: grid;
-            grid-template-columns: repeat(10, 1fr);
-            gap: 8px;
-            max-width: 900px;
-            margin: 20px auto;
-        }
-        .card-btn {
-            background: #1f2e3b;
-            padding: 8px;
-            border-radius: 12px;
-            cursor: pointer;
-        }
-        .card-btn.taken { background: #7f2a2a; opacity: 0.6; cursor: not-allowed; }
-        .card-btn.selected { background: #e67e22; box-shadow: 0 0 8px gold; }
-        .countdown { font-size: 2rem; color: #ffd966; }
-        .bingo-table { margin: auto; border-collapse: collapse; background: #1e2e3e; }
-        .bingo-table td, .bingo-table th {
-            width: 58px;
-            height: 58px;
-            border: 1px solid #2f4b5c;
-            text-align: center;
-            cursor: pointer;
-        }
-        .marked-cell { background: #f4b942 !important; color: #1f2a2e; }
-        .free-cell { background: #5a7c5a; }
-        .grid75 {
-            display: grid;
-            grid-template-columns: repeat(15, 44px);
-            gap: 5px;
-            justify-content: center;
-            max-height: 340px;
-            overflow-y: auto;
-            background: #07121c;
-            border-radius: 28px;
-            padding: 8px;
-        }
-        .cell { background: #152b36; border-radius: 12px; padding: 8px 0; text-align: center; }
-        .cell.called { background: #27ae60; }
-        .winner-toast { background: linear-gradient(135deg, #f1c40f, #e67e22); color: #1e2a2e; padding: 12px 20px; border-radius: 60px; width: fit-content; margin: 15px auto; }
-        .player-list { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin: 15px 0; }
-        .player-tag { background: #14212b; padding: 4px 12px; border-radius: 40px; }
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); justify-content: center; align-items: center; z-index: 1000; }
-        .modal-content { background: #1e2e3e; padding: 30px; border-radius: 32px; min-width: 300px; text-align: center; }
-        @media (max-width: 780px) {
-            .bingo-table td, .bingo-table th { width: 42px; height: 42px; }
-            .grid75 { grid-template-columns: repeat(15, 32px); }
-        }
-        .hidden { display: none; }
-        .prize-pool {
-            background: #e67e22;
-            border-radius: 60px;
-            padding: 6px 16px;
-            font-weight: bold;
-        }
-        #authError { color:#ff9999; margin-top:10px; }
-        #gameArea { display: none; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>BINGO · Telegram Mini App</title>
+
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+
+<style>
+* { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+
+body {
+    font-family: 'Segoe UI', system-ui;
+    background: linear-gradient(145deg, #0a0f1e 0%, #0d1b2a 100%);
+    color: #f0f3fa;
+    margin: 0;
+    padding: 20px;
+}
+
+.container { max-width: 1300px; margin: auto; }
+
+.auth-panel, .game-panel {
+    background: #11212ecc;
+    border-radius: 30px;
+    padding: 20px;
+    text-align: center;
+}
+
+.hidden { display: none; }
+
+.balance-bar {
+    display:flex;
+    justify-content:space-between;
+    padding:10px;
+    background:#0a1620;
+    border-radius:20px;
+    margin-bottom:15px;
+}
+
+button {
+    padding:8px 15px;
+    border:none;
+    border-radius:20px;
+    cursor:pointer;
+}
+
+.primary { background:#e67e22; color:#fff; }
+.danger { background:#7f2a2a; color:#fff; }
+
+.cards-grid {
+    display:grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap:6px;
+}
+
+.card-btn {
+    padding:8px;
+    background:#1f2e3b;
+    border-radius:10px;
+}
+
+.card-btn.taken { background:#7f2a2a; opacity:0.5; }
+.card-btn.selected { background:#e67e22; }
+
+.countdown { font-size:24px; color:#ffd966; margin:10px; }
+
+.prize { background:#e67e22; padding:6px 12px; border-radius:20px; }
+</style>
 </head>
+
 <body>
+
 <div class="container">
 
-    <!-- TELEGRAM AUTH PANEL -->
-    <div id="authPanel" class="auth-panel">
-        <h2>🎲 BINGO · Login with Telegram</h2>
-                   
-
-            <div id="authError"></div>
-    </div>
-
-    <!-- GAME PANEL -->
-    <div id="gamePanel" class="hidden">
-        <div class="balance-bar">
-            <span>💰 Balance: <strong id="balanceAmount">0</strong> credits</span>
-            <div>
-                <button id="depositBtn" class="primary">Deposit</button>
-                <button id="withdrawBtn">Withdraw</button>
-                <button id="logoutBtn" class="danger">Logout</button>
-            </div>
-        </div>
-
-        <div id="lobbyArea">
-            <h2>🎴 Choose your Bingo Card (1–100)</h2>
-            <div id="cardsGrid" class="cards-grid"></div>
-            <div id="countdownDisplay" class="countdown"></div>
-            <div id="playersListPage1" class="player-list"></div>
-            <div class="prize-pool" id="prizeBox">Prize: --</div>
-        </div>
-
-        <div id="gameArea">
-            <h1>🔥 LIVE BINGO</h1>
-            <div id="playersList" class="player-list"></div>
-            <div id="myCard"></div>
-            <div id="masterBoard" class="grid75"></div>
-        </div>
-    </div>
+<!-- AUTH -->
+<div id="authPanel" class="auth-panel">
+    <h2>🎲 BINGO Login</h2>
+    <p id="authError"></p>
 </div>
 
-<script src="/socket.io/socket.io.js"></script>
+<!-- GAME -->
+<div id="gamePanel" class="game-panel hidden">
+
+    <div class="balance-bar">
+        <span>💰 Balance: <b id="balance">0</b></span>
+        <div>
+            <button class="primary" id="logout">Logout</button>
+        </div>
+    </div>
+
+    <div id="lobby">
+        <h3>Select Card</h3>
+        <div id="cards" class="cards-grid"></div>
+        <div class="countdown" id="countdown"></div>
+        <div class="prize" id="prize">Prize: --</div>
+    </div>
+
+</div>
+
+</div>
+
 <script>
-let socket = null;
-let currentUser = null;
-let mySelectedCard = null;
-let availableCards = new Set();
-let isLobbyOpen = true;
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
 
-const authPanel = document.getElementById('authPanel');
-const gamePanel = document.getElementById('gamePanel');
-const balanceSpan = document.getElementById('balanceAmount');
-const cardsGrid = document.getElementById('cardsGrid');
+let socket;
+let user = null;
+let selectedCard = null;
+let available = new Set();
 
+const authPanel = document.getElementById("authPanel");
+const gamePanel = document.getElementById("gamePanel");
+const balanceEl = document.getElementById("balance");
+const cardsEl = document.getElementById("cards");
 
-function showGamePanel() {
-    gamePanel.classList.remove('hidden');
-    authPanel.classList.add('hidden');
-
-    document.getElementById('lobbyArea').style.display = "block";
-    document.getElementById('gameArea').style.display = "none";
+// =======================
+// UI SWITCH
+// =======================
+function showGame() {
+    authPanel.classList.add("hidden");
+    gamePanel.classList.remove("hidden");
 }
-document.getElementById('logoutBtn').onclick = async () => {
-    await fetch('/api/logout', { method: 'POST' });
-    if (socket) socket.disconnect();
-    location.reload();
-};
 
+// =======================
+// SOCKET INIT (FIXED)
+// =======================
 function initSocket(userId, username) {
-    socket = io();
-
-    socket.on('connect', () => {
-       socket.emit('auth', {
-       userId: userId,
-       username: username
-});
-});
-
-
-    socket.on('balanceUpdate', (balance) => {
-        balanceSpan.innerText = balance;
+    socket = io({
+        withCredentials: true
     });
 
-    socket.on('availableCards', (avail) => {
-        availableCards = new Set(avail);
-        renderCardGrid();
+    socket.on("connect", () => {
+        console.log("connected");
+    });
+
+    socket.on("balanceUpdate", (b) => {
+        balanceEl.innerText = b;
     });
 }
 
-function renderCardGrid() {
-    cardsGrid.innerHTML = '';
+// =======================
+// RENDER CARDS
+// =======================
+function renderCards() {
+    cardsEl.innerHTML = "";
+
     for (let i = 1; i <= 100; i++) {
-        const btn = document.createElement('button');
+        const btn = document.createElement("button");
         btn.textContent = i;
-        btn.classList.add('card-btn');
+        btn.className = "card-btn";
 
-        if (!availableCards.has(i) && mySelectedCard !== i)
-            btn.classList.add('taken');
+        if (!available.has(i)) btn.classList.add("taken");
+        if (selectedCard === i) btn.classList.add("selected");
 
-        if (mySelectedCard === i)
-            btn.classList.add('selected');
+        btn.onclick = () => {
+            selectedCard = i;
+            socket.emit("selectCard", {
+                name: user.username,
+                cardNumber: i
+            });
+            renderCards();
+        };
 
-        btn.onclick = () => selectCard(i);
-        cardsGrid.appendChild(btn);
+        cardsEl.appendChild(btn);
     }
 }
 
-function selectCard(cardNum) {
-    mySelectedCard = cardNum;
-    socket.emit('selectCard', {
-        name: currentUser.username,
-        cardNumber: cardNum
-    });
-}
+// =======================
+// TELEGRAM LOGIN (FIXED)
+// =======================
+async function login() {
 
-const tg = window.Telegram.WebApp;
-const initData = tg.initData;
-
-fetch("/auth", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ initData })
-});
-
-async function telegramAutoLogin() {
     const initData = tg.initData;
 
     if (!initData) {
-    document.getElementById("authError").innerText =
-        "❌ Open this app from Telegram bot (not browser)";
-    console.log("INIT DATA EMPTY");
-    return;
-}
+        document.getElementById("authError").innerText =
+            "Open from Telegram only";
+        return;
+    }
 
-    const res = await fetch('/api/telegram-miniapp-auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+    const res = await fetch("/api/telegram-miniapp-auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ initData })
     });
 
     const data = await res.json();
 
-    if (data.success) {
-        currentUser = {
-            userId: data.userId,
-            username: data.username
-        };
-
-        balanceSpan.innerText = data.balance;
-
-        initSocket(data.userId, data.username);
-       setTimeout(showGamePanel, 300);
+    if (!data.success) {
+        document.getElementById("authError").innerText = "Login failed";
+        return;
     }
+
+    user = {
+        userId: data.userId,
+        username: data.username
+    };
+
+    balanceEl.innerText = data.balance;
+
+    initSocket(data.userId, data.username);
+
+    showGame();
 }
-telegramAutoLogin();
+
+// =======================
+// LOGOUT
+// =======================
+document.getElementById("logout").onclick = async () => {
+    await fetch("/api/logout", { method: "POST" });
+    location.reload();
+};
+
+// START
+login();
 </script>
+
 </body>
 </html>
