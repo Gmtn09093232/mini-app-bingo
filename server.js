@@ -12,6 +12,19 @@ const server = http.createServer(app);
 const io = socketIo(server);
 require('dotenv').config();
 
+const sharedSession = session({
+    secret: 'bingo_super_secret_key_change_me',
+    resave: false,
+    saveUninitialized: false
+});
+
+app.use(sharedSession);
+
+io.use((socket, next) => {
+    sharedSession(socket.request, {}, next);
+});
+
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -45,26 +58,6 @@ function getLoggedInUser(req) {
 }
 
 // ---------- TELEGRAM AUTH ----------
-function checkTelegramAuth(data) {
-    const secret = crypto
-        .createHash('sha256')
-        .update(process.env.TELEGRAM_BOT_TOKEN)
-        .digest();
-
-    const checkString = Object.keys(data)
-        .filter(key => key !== 'hash')
-        .sort()
-        .map(key => `${key}=${data[key]}`)
-        .join('\n');
-
-    const hmac = crypto
-        .createHmac('sha256', secret)
-        .update(checkString)
-        .digest('hex');
-
-    return hmac === data.hash;
-}
-
 app.post('/api/telegram-miniapp-auth', (req, res) => {
     const { initData } = req.body;
 
@@ -75,7 +68,7 @@ app.post('/api/telegram-miniapp-auth', (req, res) => {
     const params = new URLSearchParams(initData);
     const userData = JSON.parse(params.get('user'));
 
-    const telegramId = userData.id.toString();
+    const telegramId = String(userData.id);
     const username = userData.username || userData.first_name;
 
     if (!users[telegramId]) {
@@ -90,7 +83,6 @@ app.post('/api/telegram-miniapp-auth', (req, res) => {
     }
 
     req.session.userId = telegramId;
-    req.session.username = username;
 
     res.json({
         success: true,
@@ -222,28 +214,6 @@ function calculatePrize() {
     return GAME_COST * Object.keys(players).length * (1 - HOUSE_PERCENT);
 }
 
-function verifyTelegramInitData(initData) {
-    const urlParams = new URLSearchParams(initData);
-    const hash = urlParams.get('hash');
-    urlParams.delete('hash');
-
-    const dataCheckString = Array.from(urlParams.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => `${key}=${value}`)
-        .join('\n');
-
-    const secretKey = crypto
-        .createHash('sha256')
-        .update(process.env.TELEGRAM_BOT_TOKEN)
-        .digest();
-
-    const hmac = crypto
-        .createHmac('sha256', secretKey)
-        .update(dataCheckString)
-        .digest('hex');
-
-    return hmac === hash;
-}
 function verifyTelegramWebApp(initData, botToken) {
   const urlParams = new URLSearchParams(initData);
   const hash = urlParams.get("hash");
@@ -298,7 +268,7 @@ function startGame() {
 
     for (let id in players) {
         const p = players[id];
-        const user = users[p.userId]; // FIXED
+        const user = users[String(p.userId)]; // FIXED
 
         if (!user || user.balance < GAME_COST) {
             playersToRemove.push(id);
@@ -326,13 +296,18 @@ function startGame() {
 // ---------- SOCKET ----------
 io.on('connection', (socket) => {
 
-    socket.on('auth', ({ userId, username }) => {
-        socket.userId = userId;
-        socket.username = username;
+   io.use((socket, next) => {
+    const session = socket.request.session;
 
-        const user = users[userId];
-        if (user) socket.emit('balanceUpdate', user.balance);
-    });
+    if (!session || !session.userId) {
+        return next(new Error("Unauthorized"));
+    }
+
+    socket.userId = session.userId;
+    socket.username = users[session.userId]?.username;
+
+    next();
+});
 
     socket.on('selectCard', ({ name, cardNumber }) => {
 
