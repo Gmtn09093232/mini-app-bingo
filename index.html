@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>BINGO · Telegram Mini App</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script> 
     <style>
         * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
         body {
@@ -106,7 +107,8 @@
     <!-- TELEGRAM AUTH PANEL -->
     <div id="authPanel" class="auth-panel">
         <h2>🎲 BINGO · Login with Telegram</h2>
-        <script src="https://telegram.org/js/telegram-web-app.js"></script>               
+                   
+
             <div id="authError" style="color:#ff9999; margin-top:10px;"></div>
     </div>
 
@@ -151,25 +153,6 @@ const gamePanel = document.getElementById('gamePanel');
 const balanceSpan = document.getElementById('balanceAmount');
 const cardsGrid = document.getElementById('cardsGrid');
 
-function onTelegramAuth(user) {
-    fetch('/api/telegram-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(user)
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            currentUser = {
-                username: data.username,
-                userId: data.userId
-            };
-            balanceSpan.innerText = data.balance;
-            initSocket(data.userId, data.username);
-            showGamePanel();
-        }
-    });
-}
 
 function showGamePanel() {
     gamePanel.classList.remove('hidden');
@@ -187,10 +170,11 @@ function initSocket(userId, username) {
 
     socket.on('connect', () => {
        socket.emit('auth', {
-    userId: data.userId,
-    username: data.username
+       userId: userId,
+       username: username
 });
-    });
+});
+
 
     socket.on('balanceUpdate', (balance) => {
         balanceSpan.innerText = balance;
@@ -235,9 +219,11 @@ async function telegramAutoLogin() {
     const initData = tg.initData;
 
     if (!initData) {
-        console.log("INIT DATA:", tg.initData);
-        return;
-    }
+    document.getElementById("authError").innerText =
+        "❌ Open this app from Telegram bot (not browser)";
+    console.log("INIT DATA EMPTY");
+    return;
+}
 
     const res = await fetch('/api/telegram-miniapp-auth', {
         method: 'POST',
