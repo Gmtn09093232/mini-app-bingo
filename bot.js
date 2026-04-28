@@ -31,8 +31,7 @@ function saveRequests() {
    TELEGRAM AUTO LOGIN USER
 ========================= */
 bot.start((ctx) => {
-
-  const tgId = ctx.from.id;
+  const tgId = String(ctx.from.id);
   const username = ctx.from.username || "player";
 
   if (!users[tgId]) {
@@ -44,7 +43,9 @@ bot.start((ctx) => {
     saveUsers();
   }
 
-  ctx.reply(`Welcome ${username}\nBalance: ${users[tgId].balance}`, {
+  const user = users[tgId];
+
+  ctx.reply(`Welcome ${username}\nBalance: ${user.balance}`, {
     reply_markup: {
       keyboard: [
         ["🎮 Play"],
@@ -60,18 +61,16 @@ bot.start((ctx) => {
    PLAY BUTTON (SECURE LOGIN)
 ========================= */
 bot.hears("🎮 Play", (ctx) => {
-
-  // IMPORTANT: use Telegram WebApp login (NO manual params)
   ctx.reply("🚀 Open Bingo Game:", {
     reply_markup: {
-      inline_keyboard: [
-        [
-          {
-            text: "▶️ Play Now",
-            web_app: { url: FRONTEND_URL }
+      inline_keyboard: [[
+        {
+          text: "▶️ Play Now",
+          web_app: {
+            url: `${FRONTEND_URL}?tgId=${ctx.from.id}`
           }
-        ]
-      ]
+        }
+      ]]
     }
   });
 });
@@ -105,16 +104,16 @@ bot.hears("➖ Withdraw", (ctx) => {
    HANDLE AMOUNT INPUT
 ========================= */
 bot.on("text", (ctx) => {
-
   const action = userStates.get(ctx.from.id);
   if (!action) return;
 
-  const amount = parseFloat(ctx.message.text);
-  if (isNaN(amount) || amount <= 0) {
+  const amount = Number(ctx.message.text);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
     return ctx.reply("❌ Invalid amount");
   }
 
-  const user = users[ctx.from.id];
+  const user = getUser(ctx.from.id);
   if (!user) return;
 
   if (action === "withdraw" && user.balance < amount) {
@@ -133,25 +132,10 @@ bot.on("text", (ctx) => {
   requests.push(request);
   saveRequests();
 
-  ctx.reply(`✅ Request sent for ${action}: ${amount}`);
-
-  bot.telegram.sendMessage(
-    ADMIN_ID,
-    `📥 New Request
-User: ${user.username}
-Type: ${action}
-Amount: ${amount}`,
-    Markup.inlineKeyboard([
-      [
-        Markup.button.callback("✅ Approve", `approve_${request.id}`),
-        Markup.button.callback("❌ Reject", `reject_${request.id}`)
-      ]
-    ])
-  );
+  ctx.reply(`✅ Request sent: ${action} ${amount}`);
 
   userStates.delete(ctx.from.id);
 });
-
 /* =========================
    ADMIN APPROVE
 ========================= */

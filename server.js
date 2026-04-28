@@ -244,7 +244,24 @@ function verifyTelegramInitData(initData) {
 
     return hmac === hash;
 }
+function verifyTelegramWebApp(initData, botToken) {
+  const urlParams = new URLSearchParams(initData);
+  const hash = urlParams.get("hash");
+  urlParams.delete("hash");
 
+  const dataCheckString = [...urlParams.entries()]
+    .sort()
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n");
+
+  const secretKey = crypto.createHash("sha256").update(botToken).digest();
+  const hmac = crypto
+    .createHmac("sha256", secretKey)
+    .update(dataCheckString)
+    .digest("hex");
+
+  return hmac === hash;
+}
 // (ALL YOUR GAME FUNCTIONS REMAIN EXACTLY SAME)
 // I DID NOT TOUCH ANY GAME LOGIC BELOW 👇
 
