@@ -35,7 +35,6 @@ bot.start((ctx) => {
   const tgId = ctx.from.id;
   const username = ctx.from.username || "player";
 
-  // create user if not exists
   if (!users[tgId]) {
     users[tgId] = {
       telegramId: tgId,
@@ -58,22 +57,20 @@ bot.start((ctx) => {
 });
 
 /* =========================
-   PLAY BUTTON (LOGIN GAME)
+   PLAY BUTTON (SECURE LOGIN)
 ========================= */
 bot.hears("🎮 Play", (ctx) => {
 
-  const tgId = ctx.from.id;
-  const username = ctx.from.username || "player";
-
-  const url = `${FRONTEND_URL}?tgId=${tgId}&username=${username}`;
-
+  // IMPORTANT: use Telegram WebApp login (NO manual params)
   ctx.reply("🚀 Open Bingo Game:", {
     reply_markup: {
       inline_keyboard: [
-        [{
-          text: "▶️ Play Now",
-          web_app: { url }
-        }]
+        [
+          {
+            text: "▶️ Play Now",
+            web_app: { url: FRONTEND_URL }
+          }
+        ]
       ]
     }
   });
@@ -188,10 +185,6 @@ bot.action(/approve_(\d+)/, (ctx) => {
     req.userId,
     `✅ ${req.type} of ${req.amount} approved`
   );
-
-  /* IMPORTANT:
-     GAME WILL GET UPDATE VIA SOCKET SERVER (NOT BOT)
-  */
 });
 
 /* =========================

@@ -28,6 +28,13 @@
   "5423314276": {
     "id": 5423314276,
     "username": "giziemelkamu129",
-    "balance": 3800
+    "balance": 4800
+  },
+  "ghjggfgfg": {
+    "userId": "870d5706-62a7-48a7-9ff8-017c69f79ce1",
+    "username": "ghjggfgfg",
+    "password": "$2b$10$nXEgpvPy5YFUkLvZ4s8wxeeqgwudR8Df0G6GAML/L/yt98Onmof6e",
+    "balance": 10,
+    "createdAt": "2026-04-25T09:11:16.701Z"
   }
 }
