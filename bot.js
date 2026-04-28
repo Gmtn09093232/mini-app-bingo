@@ -1,7 +1,7 @@
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs-extra');
 
-const BOT_TOKEN = "8761020127:AAERE7_Od3JRMba00m0ER22rCE4Vz00clCg";
+const BOT_TOKEN = "8687947415:AAEnyvS8LMx3QYWsEaMhX6kB8phSWS4a550";
 const ADMIN_ID = 5423314276;
 const FRONTEND_URL = "https://mini-app-bingo.onrender.com";
 
