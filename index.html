@@ -157,8 +157,10 @@ const cardsGrid = document.getElementById('cardsGrid');
 function showGamePanel() {
     gamePanel.classList.remove('hidden');
     authPanel.classList.add('hidden');
-}
 
+    document.getElementById('lobbyArea').style.display = "block";
+    document.getElementById('gameArea').style.display = "none";
+}
 document.getElementById('logoutBtn').onclick = async () => {
     await fetch('/api/logout', { method: 'POST' });
     if (socket) socket.disconnect();
@@ -242,8 +244,7 @@ async function telegramAutoLogin() {
         balanceSpan.innerText = data.balance;
 
         initSocket(data.userId, data.username);
-
-        showGamePanel();
+       setTimeout(showGamePanel, 300);
     }
 }
 telegramAutoLogin();
