@@ -65,6 +65,41 @@ function checkTelegramAuth(data) {
     return hmac === data.hash;
 }
 
+app.post('/api/telegram-miniapp-auth', (req, res) => {
+    const { initData } = req.body;
+
+    if (!verifyTelegramInitData(initData)) {
+        return res.status(403).json({ error: 'Invalid Telegram data' });
+    }
+
+    const params = new URLSearchParams(initData);
+    const userData = JSON.parse(params.get('user'));
+
+    const telegramId = userData.id.toString();
+    const username = userData.username || userData.first_name;
+
+    if (!users[telegramId]) {
+        users[telegramId] = {
+            userId: telegramId,
+            username,
+            telegramId,
+            balance: 10,
+            createdAt: new Date().toISOString()
+        };
+        saveUsers();
+    }
+
+    req.session.userId = telegramId;
+    req.session.username = username;
+
+    res.json({
+        success: true,
+        userId: telegramId,
+        username,
+        balance: users[telegramId].balance
+    });
+});
+
 app.post('/api/telegram-login', (req, res) => {
     const data = req.body;
 
@@ -185,6 +220,29 @@ const HOUSE_PERCENT = 0.2;
 
 function calculatePrize() {
     return GAME_COST * Object.keys(players).length * (1 - HOUSE_PERCENT);
+}
+
+function verifyTelegramInitData(initData) {
+    const urlParams = new URLSearchParams(initData);
+    const hash = urlParams.get('hash');
+    urlParams.delete('hash');
+
+    const dataCheckString = Array.from(urlParams.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, value]) => `${key}=${value}`)
+        .join('\n');
+
+    const secretKey = crypto
+        .createHash('sha256')
+        .update(process.env.TELEGRAM_BOT_TOKEN)
+        .digest();
+
+    const hmac = crypto
+        .createHmac('sha256', secretKey)
+        .update(dataCheckString)
+        .digest('hex');
+
+    return hmac === hash;
 }
 
 // (ALL YOUR GAME FUNCTIONS REMAIN EXACTLY SAME)
