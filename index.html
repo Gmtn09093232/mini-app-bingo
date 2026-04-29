@@ -120,10 +120,9 @@ const cardsEl = document.getElementById("cards");
 // UI SWITCH
 // =======================
 function showGame() {
-    authPanel.classList.add("hidden");
+    authPanel.style.display = "none";
     gamePanel.classList.remove("hidden");
 }
-
 // =======================
 // SOCKET INIT (FIXED)
 // =======================
@@ -134,13 +133,18 @@ function initSocket(userId, username) {
 
     socket.on("connect", () => {
         console.log("connected");
+
+        // optional: register user properly
+        socket.emit("auth", {
+            userId,
+            username
+        });
     });
 
     socket.on("balanceUpdate", (b) => {
         balanceEl.innerText = b;
     });
 }
-
 // =======================
 // RENDER CARDS
 // =======================
@@ -181,31 +185,40 @@ async function login() {
         return;
     }
 
-    const res = await fetch("/api/telegram-miniapp-auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ initData })
-    });
+    try {
+        const res = await fetch("/api/telegram-miniapp-auth", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ initData })
+        });
 
-    const data = await res.json();
+        const data = await res.json();
 
-    if (!data.success) {
-        document.getElementById("authError").innerText = "Login failed";
-        return;
+        if (!data.success) {
+            document.getElementById("authError").innerText = "Login failed";
+            return;
+        }
+
+        user = {
+            userId: data.userId,
+            username: data.username
+        };
+
+        balanceEl.innerText = data.balance;
+
+        initSocket(data.userId, data.username);
+
+        showGame();
+
+        // 🔥 IMPORTANT FIX: load cards AFTER login
+        renderCards();
+
+    } catch (err) {
+        document.getElementById("authError").innerText =
+            "Server error";
+        console.error(err);
     }
-
-    user = {
-        userId: data.userId,
-        username: data.username
-    };
-
-    balanceEl.innerText = data.balance;
-
-    initSocket(data.userId, data.username);
-
-    showGame();
 }
-
 // =======================
 // LOGOUT
 // =======================
@@ -215,7 +228,7 @@ document.getElementById("logout").onclick = async () => {
 };
 
 // START
-login();
+console.log("Telegram initData:", tg.initData);
 </script>
 
 </body>
