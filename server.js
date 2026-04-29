@@ -1,238 +1,161 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const path = require('path');
-const session = require('express-session');
-const fs = require('fs-extra');
-const { v4: uuidv4 } = require('uuid');
-const crypto = require('crypto');
 require('dotenv').config();
 
+const express = require('express');
+const http = require('http');
+const path = require('path');
+const session = require('express-session');
+const crypto = require('crypto');
+const { Server } = require('socket.io');
+const { v4: uuidv4 } = require('uuid');
+
+// ======================
+// OPTIONAL NEON DB (SAFE)
+// ======================
+let neon = null;
+if (process.env.DATABASE_URL) {
+    const { Pool } = require('@neondatabase/serverless');
+    neon = new Pool({ connectionString: process.env.DATABASE_URL });
+}
+
+// ======================
+// APP INIT
+// ======================
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
+const io = new Server(server);
 
-// =====================
-// MIDDLEWARE (FIXED)
-// =====================
+// ======================
+// MIDDLEWARE
+// ======================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const sharedSession = session({
-    secret: 'bingo_super_secret_key_change_me',
+const sessionMiddleware = session({
+    secret: process.env.SESSION_SECRET || 'change_this_secret',
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false }
 });
 
-app.use(sharedSession);
+app.use(sessionMiddleware);
+io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
 
-// SOCKET SESSION BRIDGE (FIXED)
-io.use((socket, next) => {
-    sharedSession(socket.request, {}, next);
-});
-
-// =====================
+// ======================
 // FRONTEND
-// =====================
+// ======================
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// =====================
-// USERS DB
-// =====================
-const USERS_FILE = './users.json';
-fs.ensureFileSync(USERS_FILE);
-
+// ======================
+// MEMORY DB (fallback)
+// ======================
 let users = {};
-try {
-    users = fs.readJsonSync(USERS_FILE);
-} catch {
-    users = {};
-}
+let requests = [];
 
-function saveUsers() {
-    fs.writeJsonSync(USERS_FILE, users, { spaces: 2 });
-}
-
-function getUser(req) {
-    if (!req.session.userId) return null;
-    return users[req.session.userId];
-}
-
-// =====================
+// ======================
 // TELEGRAM VERIFY
-// =====================
-function verifyTelegramInitData(initData) {
+// ======================
+function verifyTelegram(initData) {
     const urlParams = new URLSearchParams(initData);
     const hash = urlParams.get('hash');
     urlParams.delete('hash');
 
-    const dataCheckString = Array.from(urlParams.entries())
+    const dataCheck = [...urlParams.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([k, v]) => `${k}=${v}`)
         .join('\n');
 
-    const secretKey = crypto
+    const secret = crypto
         .createHash('sha256')
         .update(process.env.TELEGRAM_BOT_TOKEN)
         .digest();
 
     const hmac = crypto
-        .createHmac('sha256', secretKey)
-        .update(dataCheckString)
+        .createHmac('sha256', secret)
+        .update(dataCheck)
         .digest('hex');
 
     return hmac === hash;
 }
 
-// =====================
-// AUTH (Telegram Mini App)
-// =====================
-app.post('/api/telegram-miniapp-auth', (req, res) => {
+// ======================
+// AUTH API
+// ======================
+app.post('/api/telegram-auth', (req, res) => {
     const { initData } = req.body;
 
-    if (!verifyTelegramInitData(initData)) {
+    if (!verifyTelegram(initData)) {
         return res.status(403).json({ error: 'Invalid Telegram data' });
     }
 
     const params = new URLSearchParams(initData);
     const userData = JSON.parse(params.get('user'));
 
-    const telegramId = String(userData.id);
+    const id = String(userData.id);
     const username = userData.username || userData.first_name;
 
-    if (!users[telegramId]) {
-        users[telegramId] = {
-            userId: telegramId,
+    if (!users[id]) {
+        users[id] = {
+            id,
             username,
-            telegramId,
-            balance: 10,
-            createdAt: new Date().toISOString()
+            balance: 100, // casino starter bonus
+            createdAt: Date.now()
         };
-        saveUsers();
     }
 
-    req.session.userId = telegramId;
+    req.session.userId = id;
 
     res.json({
         success: true,
-        userId: telegramId,
+        userId: id,
         username,
-        balance: users[telegramId].balance
+        balance: users[id].balance
     });
 });
 
-// =====================
+// ======================
 // LOGOUT
-// =====================
+// ======================
 app.post('/api/logout', (req, res) => {
-    req.session.destroy();
+    req.session.destroy(() => {});
     res.json({ success: true });
 });
 
-// =====================
-// REQUESTS DB
-// =====================
-const REQUESTS_FILE = './requests.json';
-fs.ensureFileSync(REQUESTS_FILE);
-
-let pendingRequests = [];
-try {
-    pendingRequests = fs.readJsonSync(REQUESTS_FILE);
-} catch {
-    pendingRequests = [];
-}
-
-function saveRequests() {
-    fs.writeJsonSync(REQUESTS_FILE, pendingRequests, { spaces: 2 });
-}
-
-// =====================
-// DEPOSIT / WITHDRAW
-// =====================
-app.post('/api/request-deposit', (req, res) => {
-    const user = getUser(req);
-    if (!user) return res.status(401).json({ error: 'Not logged in' });
-
-    const amount = parseFloat(req.body.amount);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
-
-    pendingRequests.push({
-        id: uuidv4(),
-        userId: user.userId,
-        username: user.username,
-        type: 'deposit',
-        amount,
-        status: 'pending',
-        createdAt: new Date().toISOString()
-    });
-
-    saveRequests();
-    res.json({ success: true });
-});
-
-app.post('/api/request-withdraw', (req, res) => {
-    const user = getUser(req);
-    if (!user) return res.status(401).json({ error: 'Not logged in' });
-
-    const amount = parseFloat(req.body.amount);
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
-    if (user.balance < amount) return res.status(400).json({ error: 'Insufficient balance' });
-
-    pendingRequests.push({
-        id: uuidv4(),
-        userId: user.userId,
-        username: user.username,
-        type: 'withdraw',
-        amount,
-        status: 'pending',
-        createdAt: new Date().toISOString()
-    });
-
-    saveRequests();
-    res.json({ success: true });
-});
-
-// =====================
-// GAME STATE
-// =====================
+// ======================
+// GAME ENGINE (CASINO BINGO)
+// ======================
 let players = {};
 let takenCards = new Set();
 let gameActive = false;
-let isLobbyOpen = true;
+let lobbyOpen = true;
 
-const GAME_COST = 10;
-const HOUSE_PERCENT = 0.2;
+const CARD_COST = 10;
+const HOUSE_EDGE = 0.2;
 
-// =====================
+// ======================
 // CARD GENERATOR
-// =====================
-function generateCardFromNumber(cardNum) {
-    function seededRandom(seed) {
-        let x = Math.sin(seed) * 10000;
-        return x - Math.floor(x);
-    }
+// ======================
+function generateCard(seed) {
+    const rand = (s) => Math.abs(Math.sin(s++) * 10000) % 1;
 
-    function column(min, max, seedOffset) {
-        let col = [];
-        let seed = cardNum * 131 + seedOffset;
-
-        while (col.length < 5) {
-            let n = Math.floor(seededRandom(seed++) * (max - min + 1)) + min;
-            if (!col.includes(n)) col.push(n);
+    const col = (min, max, off) => {
+        let arr = [];
+        let s = seed + off;
+        while (arr.length < 5) {
+            let n = Math.floor(rand(s++) * (max - min + 1)) + min;
+            if (!arr.includes(n)) arr.push(n);
         }
-        return col;
-    }
+        return arr;
+    };
 
-    let B = column(1, 15, 1);
-    let I = column(16, 30, 2);
-    let N = column(31, 45, 3);
-    let G = column(46, 60, 4);
-    let O = column(61, 75, 5);
+    const card = [];
+    const B = col(1, 15, 1);
+    const I = col(16, 30, 2);
+    const N = col(31, 45, 3);
+    const G = col(46, 60, 4);
+    const O = col(61, 75, 5);
 
-    let card = [];
     for (let i = 0; i < 5; i++) {
         card.push(B[i], I[i], N[i], G[i], O[i]);
     }
@@ -241,67 +164,75 @@ function generateCardFromNumber(cardNum) {
     return card;
 }
 
-// =====================
-// SOCKET AUTH (FIXED)
-// =====================
+// ======================
+// SOCKET AUTH FIX
+// ======================
 io.use((socket, next) => {
-    const session = socket.request.session;
+    const sess = socket.request.session;
 
-    if (!session || !session.userId) {
-        return next(new Error("Unauthorized"));
-    }
+    if (!sess?.userId) return next(new Error("Unauthorized"));
 
-    socket.userId = session.userId;
-    socket.username = users[session.userId]?.username;
+    socket.userId = sess.userId;
+    socket.username = users[sess.userId]?.username;
 
     next();
 });
 
-// =====================
-// SOCKET EVENTS
-// =====================
+// ======================
+// SOCKET GAME
+// ======================
 io.on('connection', (socket) => {
 
-    socket.on('selectCard', ({ name, cardNumber }) => {
+    socket.on('selectCard', ({ cardNumber }) => {
+        if (!lobbyOpen) return;
+        if (takenCards.has(cardNumber)) return;
 
-        if (!isLobbyOpen) return;
+        const user = users[socket.userId];
+        if (!user || user.balance < CARD_COST) return;
 
-        const num = parseInt(cardNumber);
-        if (takenCards.has(num)) return;
+        user.balance -= CARD_COST;
 
-        takenCards.add(num);
+        takenCards.add(cardNumber);
 
         players[socket.id] = {
-            id: socket.id,
-            name,
-            cardNumber: num,
-            card: generateCardFromNumber(num),
-            marked: new Array(25).fill(false),
+            socketId: socket.id,
             userId: socket.userId,
-            username: socket.username
+            username: socket.username,
+            cardNumber,
+            card: generateCard(cardNumber),
+            marked: Array(25).fill(false)
         };
 
         players[socket.id].marked[12] = true;
 
-        socket.emit('cardAssigned', {
-            playerId: socket.id,
-            card: players[socket.id].card,
-            gameActive: false
-        });
+        socket.emit('cardAssigned', players[socket.id]);
+        io.to(socket.id).emit('balanceUpdate', user.balance);
     });
 
     socket.on('disconnect', () => {
-        if (players[socket.id]) {
-            takenCards.delete(players[socket.id].cardNumber);
+        const p = players[socket.id];
+        if (p) {
+            takenCards.delete(p.cardNumber);
             delete players[socket.id];
         }
     });
 });
 
-// =====================
-// SERVER START
-// =====================
+// ======================
+// START GAME (AUTO)
+// ======================
+function startGame() {
+    if (gameActive) return;
+    gameActive = true;
+    lobbyOpen = false;
+
+    io.emit('gameStarted');
+}
+
+// ======================
+// SERVER
+// ======================
 const PORT = process.env.PORT || 13926;
-server.listen(PORT, () =>
-    console.log(`✅ Server running on http://localhost:${PORT}`)
-);
+server.listen(PORT, () => {
+    console.log(`✅ Server running on http://localhost:${PORT}`);
+});
